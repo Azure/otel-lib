@@ -23,6 +23,7 @@ let metric_targets = vec![MetricsExportTarget {
         url: "http://localhost:4317".to_string(),
         interval_secs: 30,
         timeout: 15,
+        delta_temporality: false,
     }];
 
 let log_targets = vec![LogsExportTarget {

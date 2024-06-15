@@ -65,6 +65,8 @@ pub struct MetricsExportTarget {
     pub interval_secs: u64,
     /// export timeout - how long to wait before timing out on a push to the target.
     pub timeout: u64,
+    /// delta temporality export preference
+    pub delta_temporality: bool,
 }
 
 #[derive(Clone, Debug)]

@@ -29,6 +29,7 @@ async fn main() {
                 url: url.clone(),
                 interval_secs: 1,
                 timeout: 5,
+                delta_temporality: false,
             }];
             let logs_targets = vec![LogsExportTarget {
                 url,
