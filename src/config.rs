@@ -2,6 +2,7 @@
 // Licensed under the MIT License.
 
 use opentelemetry::logs::Severity;
+use opentelemetry_sdk::metrics::data::Temporality;
 use serde::Deserialize;
 
 #[derive(Clone, Debug)]
@@ -65,8 +66,8 @@ pub struct MetricsExportTarget {
     pub interval_secs: u64,
     /// export timeout - how long to wait before timing out on a push to the target.
     pub timeout: u64,
-    /// delta temporality export preference
-    pub delta_temporality: bool,
+    /// export temporality preference, defaults to cumulative if not specified.
+    pub temporality: Option<Temporality>,
 }
 
 #[derive(Clone, Debug)]

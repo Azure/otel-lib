@@ -88,7 +88,7 @@ impl Otel {
 #[derive(Default, Debug)]
 /// A temporality selector that returns Delta for all instruments
 
-pub struct DeltaTemporalitySelector {}
+pub (crate) struct DeltaTemporalitySelector {}
 
 impl DeltaTemporalitySelector {
     /// Create a new default temporality selector
@@ -146,10 +146,17 @@ fn init_metrics(config: Config) -> (Option<Registry>, SdkMeterProvider) {
                 timeout: Duration::from_secs(export_target.timeout),
                 protocol: Protocol::Grpc,
             };
-            let temporality_selector: Box<dyn TemporalitySelector> = match export_target.delta_temporality {
-                true => Box::new(DeltaTemporalitySelector::new()),
-                false => Box::new(DefaultTemporalitySelector::new()), 
-            }; 
+
+            let temporality_selector: Box<dyn TemporalitySelector>  = if let Some(temporality) = export_target.temporality {
+                match temporality {
+                    Temporality::Cumulative => Box::new(DefaultTemporalitySelector::new()),
+                    Temporality::Delta =>  Box::new(DeltaTemporalitySelector::new()),
+                    _ => Box::new(DefaultTemporalitySelector::new()),
+                }
+            } else {
+                Box::new(DefaultTemporalitySelector::new())
+            };
+          
             let exporter = match opentelemetry_otlp::new_exporter()
                 .tonic()
                 .with_export_config(export_config)
