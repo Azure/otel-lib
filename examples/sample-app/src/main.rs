@@ -36,7 +36,7 @@ async fn main() {
                 url,
                 interval_secs: 1,
                 timeout: 5,
-                export_severity: Some(Severity::Info),
+                export_severity: Some(Severity::Error),
             }];
             (Some(metric_targets), Some(logs_targets))
         }
