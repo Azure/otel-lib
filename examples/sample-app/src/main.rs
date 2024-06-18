@@ -4,6 +4,7 @@
 use clap::{arg, command, Parser};
 use log::{error, info};
 use opentelemetry::logs::Severity;
+use opentelemetry_sdk::metrics::data::Temporality;
 use otel_lib::{
     config::{Attribute, Config, LogsExportTarget, MetricsExportTarget},
     Otel,
@@ -29,7 +30,7 @@ async fn main() {
                 url: url.clone(),
                 interval_secs: 1,
                 timeout: 5,
-                temporality: None,
+                temporality: Some(Temporality::Cumulative),
             }];
             let logs_targets = vec![LogsExportTarget {
                 url,

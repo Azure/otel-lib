@@ -13,6 +13,7 @@ log = { version = "0.4", default-features = false }
 otel-lib = { path = "../.." }
 once_cell = "1.19"
 opentelemetry = { version = "0.22", features = ["metrics", "logs"]}
+opentelemetry_sdk =  {version = "0.22", features = ["metrics", "logs", "rt-tokio", "testing", "logs_level_enabled"]}
 rand = "0.8"
 tokio = { version = "1", default-features = false, features = [
 	"full",
