@@ -29,13 +29,13 @@ async fn main() {
                 url: url.clone(),
                 interval_secs: 1,
                 timeout: 5,
-                delta_temporality: false,
+                temporality: None,
             }];
             let logs_targets = vec![LogsExportTarget {
                 url,
                 interval_secs: 1,
                 timeout: 5,
-                export_severity: Some(Severity::Error),
+                export_severity: Some(Severity::Info),
             }];
             (Some(metric_targets), Some(logs_targets))
         }
