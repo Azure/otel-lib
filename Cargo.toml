@@ -31,9 +31,6 @@ serde = { version = "1", features = [
 serde_json = { version = "1.0", default-features = false, features = [
 	"alloc",
 ] }
-tokio = { version = "1", default-features = false, features = [
-	"full",
-] }
 
 [lints.rust]
 rust_2018_idioms = "warn"

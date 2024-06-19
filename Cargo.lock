@@ -1086,7 +1086,6 @@ dependencies = [
  "prometheus",
  "serde",
  "serde_json",
- "tokio",
 ]
 
 [[package]]
@@ -1530,9 +1529,7 @@ dependencies = [
  "libc",
  "mio",
  "num_cpus",
- "parking_lot",
  "pin-project-lite",
- "signal-hook-registry",
  "socket2 0.5.7",
  "tokio-macros",
  "windows-sys 0.48.0",
