@@ -33,6 +33,9 @@ let log_targets = vec![LogsExportTarget {
     export_severity: Some(Severity::Error), // Applies an additional filter at the exporter level. This can be set to `None` if no additional filtering is required.
 }];
 
+// Setup Prometheus if needed.
+let prometheus_config = Some(PrometheusConfig { port: 9090 });
+
 let config = Config {
     service_name: "myapp".to_owned(),
     emit_metrics_to_stdout: true,
@@ -44,6 +47,7 @@ let config = Config {
         key: "resource_key1".to_owned(),
         value: "1".to_owned(),
     }]),
+    prometheus_config,
     ..Config::default()
 };
 ~~~
