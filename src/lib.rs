@@ -32,8 +32,13 @@ pub mod syslog_writer;
 
 pub(crate) const SERVICE_NAME_KEY: &str = "service.name";
 
+struct PrometheusRegistry {
+    registry: Registry,
+    port: u16,
+}
+
 pub struct Otel {
-    pub registry: Option<Registry>,
+    registry: Option<PrometheusRegistry>,
     meter_provider: SdkMeterProvider,
     logger_provider: Option<LoggerProvider>,
 }
@@ -58,8 +63,12 @@ impl Otel {
 
     /// Long running tasks for otel propagation.
     pub async fn run(&self) {
-        if let Some(registry) = &self.registry {
-            let _ = httpserver_init(9600, registry.clone()).await;
+        if let Some(prometheus_registry) = &self.registry {
+            let _ = httpserver_init(
+                prometheus_registry.port,
+                prometheus_registry.registry.clone(),
+            )
+            .await;
         }
     }
 
@@ -109,7 +118,7 @@ impl TemporalitySelector for DeltaTemporalitySelector {
 ///
 /// Returns the Prometheus Registry or None if Prometheus was disabled.
 ///
-fn init_metrics(config: Config) -> (Option<Registry>, SdkMeterProvider) {
+fn init_metrics(config: Config) -> (Option<PrometheusRegistry>, SdkMeterProvider) {
     let mut keys = vec![KeyValue::new(SERVICE_NAME_KEY, config.service_name.clone())];
     if let Some(resource_attributes) = config.resource_attributes {
         for attribute in resource_attributes {
@@ -119,7 +128,7 @@ fn init_metrics(config: Config) -> (Option<Registry>, SdkMeterProvider) {
     let mut meter_provider_builder = SdkMeterProvider::builder().with_resource(Resource::new(keys));
 
     // Setup Prometheus Registry if configured
-    let registry = if config.prometheus_config.is_some() {
+    let prometheus_registry = if let Some(prometheus_config) = config.prometheus_config {
         let registry = prometheus::Registry::new();
         match opentelemetry_prometheus::exporter()
             .with_registry(registry.clone())
@@ -127,7 +136,10 @@ fn init_metrics(config: Config) -> (Option<Registry>, SdkMeterProvider) {
         {
             Ok(exporter) => {
                 meter_provider_builder = meter_provider_builder.with_reader(exporter);
-                Some(registry)
+                Some(PrometheusRegistry {
+                    registry,
+                    port: prometheus_config.port,
+                })
             }
             Err(e) => {
                 error!("unable to setup prometheus endpoint due to: {:?}", e);
@@ -199,7 +211,7 @@ fn init_metrics(config: Config) -> (Option<Registry>, SdkMeterProvider) {
     let meter_provider = meter_provider_builder.build();
     global::set_meter_provider(meter_provider.clone());
 
-    (registry, meter_provider)
+    (prometheus_registry, meter_provider)
 }
 
 /// Setup the http server for the prometheus end point

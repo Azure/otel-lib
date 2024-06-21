@@ -6,13 +6,13 @@ use log::{error, info};
 use opentelemetry::logs::Severity;
 use opentelemetry_sdk::metrics::data::Temporality;
 use otel_lib::{
-    config::{Attribute, Config, LogsExportTarget, MetricsExportTarget},
+    config::{Attribute, Config, LogsExportTarget, MetricsExportTarget, PrometheusConfig},
     Otel,
 };
 
 use rand::Rng;
 use std::time::Duration;
-use tokio::select;
+use tokio::join;
 use tokio::time::sleep;
 
 use crate::metrics::STATIC_METRICS;
@@ -24,6 +24,7 @@ async fn main() {
     // App expects 2 parameters. 1) '-n' that controls the number of iterations, and 2) '-o' to specify an otel compatible repo.
     let args = Args::parse();
 
+    let prometheus_config = Some(PrometheusConfig { port: 9090 });
     let (metrics_targets, logs_targets) = match args.otel_repo_url {
         Some(url) => {
             let metric_targets = vec![MetricsExportTarget {
@@ -53,6 +54,7 @@ async fn main() {
             key: "resource_key1".to_owned(),
             value: "1".to_owned(),
         }]),
+        prometheus_config,
         ..Config::default()
     };
 
@@ -85,10 +87,7 @@ async fn main() {
         }
     });
 
-    select! {
-        _ = instrumentation_task => {},
-        handle = otel_long_running_task => { error!("otel long running task ended unexpectedly: {:?}", handle)}
-    }
+    let _ = join!(instrumentation_task, otel_long_running_task);
     otel_component.shutdown();
 }
 

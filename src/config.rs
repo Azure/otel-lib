@@ -33,7 +33,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             service_name: "App".to_owned(),
-            prometheus_config: Some(PrometheusConfig::default()),
+            prometheus_config: None,
             metrics_export_targets: None,
             log_export_targets: None,
             emit_metrics_to_stdout: false,
