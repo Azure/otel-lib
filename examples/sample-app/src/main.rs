@@ -45,7 +45,7 @@ async fn main() {
     };
 
     let config = Config {
-        emit_metrics_to_stdout: true,
+        emit_metrics_to_stdout: false,
         metrics_export_targets: metrics_targets,
         log_export_targets: logs_targets,
         level: "info,hyper=off".to_owned(),
@@ -85,6 +85,7 @@ async fn main() {
             info!("iteration: {iteration}");
             sleep(Duration::from_micros(100)).await;
         }
+        info!("Done. Please hit [Ctrl+C] to exit");
     });
 
     let _ = join!(instrumentation_task, otel_long_running_task);
