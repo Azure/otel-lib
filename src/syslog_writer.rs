@@ -17,11 +17,8 @@ pub(crate) fn write_syslog_format(
     let level = to_syslog_level(record.level());
     let timestamp = format_rfc3339_millis(*timestamp);
     let thread_id = nix::unistd::gettid().as_raw();
-    let module = record.target();
     eprintln!(
-        r#"<{level}>{timestamp} {} [{} tid="{thread_id}" module="{module}"] - {}"#,
-        service_name,
-        host_name,
+        r#"<{level}>{timestamp} {host_name} [{service_name} tid="{thread_id}"] - {}"#,
         record.args()
     );
 }
