@@ -4,7 +4,7 @@
 use std::time::SystemTime;
 
 use humantime::format_rfc3339_millis;
-use log::Record;
+use log::{Level, Record};
 
 pub(crate) fn write_syslog_format(
     record: &Record<'_>,
@@ -17,10 +17,20 @@ pub(crate) fn write_syslog_format(
     let level = to_syslog_level(record.level());
     let timestamp = format_rfc3339_millis(*timestamp);
     let thread_id = nix::unistd::gettid().as_raw();
-    eprintln!(
-        r#"<{level}>{timestamp} {host_name} [{service_name} tid="{thread_id}"] - {}"#,
-        record.args()
-    );
+
+    if record.level() >= Level::Debug {
+        // Only include more verbose module level on Debug and Trace logs
+        eprintln!(
+            r#"<{level}>{timestamp} {host_name} [{service_name} tid="{thread_id}" module="{}"] - {}"#,
+            record.target(),
+            record.args()
+        );
+    } else {
+        eprintln!(
+            r#"<{level}>{timestamp} {host_name} [{service_name} tid="{thread_id}"] - {}"#,
+            record.args()
+        );
+    }
 }
 
 const fn to_syslog_level(level: log::Level) -> i8 {
