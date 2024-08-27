@@ -19,7 +19,7 @@ pub struct Config {
     pub resource_attributes: Option<Vec<Attribute>>,
 
     /// Optional prometheus configuration if metrics are needed in Prometheus format as well as Otel.
-    pub prometheus_config: Option<PrometheusConfig>,
+    pub prometheus_config: Option<Prometheus>,
     /// 0 or more metric export targets.
     pub metrics_export_targets: Option<Vec<MetricsExportTarget>>,
     /// 0 or more log export targets
@@ -50,14 +50,14 @@ impl Default for Config {
 
 #[derive(Clone, Debug, Deserialize, PartialEq)]
 /// Prometheus configuration, which if specified results in an HTTP endpoint that can be used to get metrics
-pub struct PrometheusConfig {
+pub struct Prometheus {
     /// The port for the HTTP end point
     pub port: u16,
 }
 
-impl Default for PrometheusConfig {
+impl Default for Prometheus {
     fn default() -> Self {
-        PrometheusConfig { port: 9600 }
+        Prometheus { port: 9600 }
     }
 }
 

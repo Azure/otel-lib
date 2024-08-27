@@ -41,3 +41,19 @@ const fn to_syslog_level(level: log::Level) -> i8 {
         log::Level::Debug | log::Level::Trace => 7,
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use log::Level;
+
+    use crate::syslog_writer::to_syslog_level;
+
+    #[test]
+    fn test_to_syslog_level() {
+        assert_eq!(to_syslog_level(Level::Error), 3);
+        assert_eq!(to_syslog_level(Level::Warn), 4);
+        assert_eq!(to_syslog_level(Level::Info), 6);
+        assert_eq!(to_syslog_level(Level::Debug), 7);
+        assert_eq!(to_syslog_level(Level::Trace), 7);
+    }
+}

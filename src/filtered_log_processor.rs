@@ -193,7 +193,7 @@ impl<R: RuntimeChannel> FilteredBatchLogProcessor<R> {
     {
         FilteredBatchLogProcessorBuilder {
             exporter,
-            batch_config: Default::default(),
+            batch_config: FilteredBatchConfig::default(),
             runtime,
         }
     }
@@ -214,10 +214,10 @@ where
     }
 
     let export = exporter.export(batch);
-    let timeout = runtime.delay(time_out);
+    let delay = runtime.delay(time_out);
     pin_mut!(export);
-    pin_mut!(timeout);
-    match future::select(export, timeout).await {
+    pin_mut!(delay);
+    match future::select(export, delay).await {
         Either::Left((export_res, _)) => export_res,
         Either::Right((_, _)) => ExportResult::Err(LogError::ExportTimedOut(time_out)),
     }

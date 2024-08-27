@@ -1,7 +1,10 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use std::time::{Duration, SystemTime};
+use std::{
+    marker::PhantomData,
+    time::{Duration, SystemTime},
+};
 
 use crate::{
     config::Config,
@@ -89,7 +92,7 @@ where
             std_err_enabled,
             host_name,
             service_name_with_iana_number,
-            _phantom: Default::default(),
+            _phantom: PhantomData,
         }
     }
 }

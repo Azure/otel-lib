@@ -1,6 +1,9 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
+#![deny(rust_2018_idioms)]
+#![warn(clippy::all, clippy::pedantic)]
+
 use std::time::Duration;
 
 use log::{error, info, warn};
@@ -44,6 +47,7 @@ pub struct Otel {
 }
 
 impl Otel {
+    #[must_use]
     pub fn new(config: Config) -> Otel {
         let logger_provider = match loggers::init_logs(config.clone()) {
             Ok(logger_provider) => Some(logger_provider),
