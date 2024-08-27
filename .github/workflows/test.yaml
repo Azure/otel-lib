@@ -1,0 +1,91 @@
+name: "test"
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - "main"
+  pull_request:
+
+concurrency:
+  group: "${{ github.workflow }}-${{ github.head_ref || github.run_id }}"
+  cancel-in-progress: true
+
+jobs:
+  find:
+    runs-on: "ubuntu-20.04"
+    outputs:
+      matrix: "${{ steps.run.outputs.matrix }}"
+    steps:
+      - uses: "actions/checkout@v3"
+      - id: "run"
+        run: "make test"
+
+  run:
+    runs-on: "ubuntu-20.04"
+    needs: "find"
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(needs.find.outputs.matrix) }}
+    steps:
+      - uses: "actions/checkout@v3"
+      - uses: "actions/cache@v3"
+        with:
+          path: |
+            ~/.cargo/.crates.toml
+            ~/.cargo/.crates2.json
+            ~/.cargo/bin/
+            ~/.cargo/registry/cache/
+            ~/.cargo/registry/index/
+          key: "cargo-cache-${{ runner.os }}-${{ github.run_id }}"
+          restore-keys: |
+            cargo-cache-${{ runner.os }}-
+      - id: coverage
+        env:
+          MANIFEST: "${{ matrix.manifest }}"
+          SUMMARY_ONLY: "${{
+              github.event_name == 'pull_request'
+              && '1'
+              || ''
+            }}"
+        run: "make coverage"
+      # NOTE: GitHub Actions does not yet have a way to collect dynamic
+      # matrix outputs as job outputs.  If this were possible, the
+      # report summary table would be exported for the comment
+      # job and the HTML would be made into an artifact.  However, since
+      # it is not, we include the summary table in the HTML artifact and
+      # use the artifact in the comment job.  This is somewhat wasteful
+      # since the HTML output is not used by the comment job, but is
+      # essentially required owing to the fact that
+      # `actions/download-artifact` does not support filtering artifact
+      # names when fetching multiple artifacts.
+      - uses: "actions/upload-artifact@v3"
+        with:
+          # WARN: The workspace name is not necessarily globally unique.
+          # If two workspaces have the same directory name, they will
+          # overwrite one another's reports.
+          name: "report-${{ matrix.workspace }}"
+          path: "${{ runner.temp }}/report"
+          if-no-files-found: "error"
+          retention-days: 10
+
+  summarize:
+    runs-on: "ubuntu-20.04"
+    needs: "run"
+    steps:
+      - uses: "actions/checkout@v3"
+      - uses: "actions/download-artifact@v3"
+      # NOTE: `ci/comment.sh` could be written inline, but this would
+      # make it harder to test manually and verify with shellcheck.
+      # The consequence of not writing the script inline, however, is
+      # that this job requires a source checkout.
+      - env:
+          GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
+          COMMENT_TARGET: "${{
+              github.event_name == 'pull_request'
+              && format('issues/{0}', github.event.number)
+              || format('commits/{0}', github.sha)
+            }}"
+          REPOSITORY: "${{ github.repository }}"
+        run: "ci/comment.sh */summary.md"
