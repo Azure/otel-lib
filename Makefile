@@ -9,7 +9,7 @@ TARGET_SUBDIRECTORY := $(if $(value RELEASE),release,debug)
 REPOSITORY_ROOT := $(shell git rev-parse --show-toplevel)
 
 
-.PHONY: check coverage default test 
+.PHONY: check coverage default test
 
 default:
 
