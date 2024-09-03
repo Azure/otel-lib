@@ -13,7 +13,7 @@ use crate::{
 };
 use log::Level;
 use opentelemetry::{
-    logs::{AnyValue, LogRecordBuilder, Logger, Severity},
+    logs::{AnyValue, LogRecord, Logger, Severity},
     KeyValue,
 };
 use opentelemetry_otlp::WithExportConfig;
@@ -58,14 +58,13 @@ where
 
         // Propagate to otel logger
         // TODO: Also emit user-defined attributes as provided by the kv feature of the log crate.
-        self.logger.emit(
-            LogRecordBuilder::new()
-                .with_severity_number(to_otel_severity(record.level()))
-                .with_severity_text(record.level().as_str())
-                .with_timestamp(timestamp)
-                .with_body(AnyValue::from(record.args().to_string()))
-                .build(),
-        );
+        let mut log_record = self.logger.create_log_record();
+        log_record.set_body(AnyValue::from(record.args().to_string()));
+        log_record.set_severity_number(to_otel_severity(record.level()));
+        log_record.set_severity_text(record.level().as_str().into());
+        log_record.set_timestamp(timestamp);
+
+        self.logger.emit(log_record);
     }
 
     fn flush(&self) {}
@@ -88,7 +87,7 @@ where
             None => service_name.to_string(),
         };
         OtelLogBridge {
-            logger: provider.versioned_logger(service_name.to_string(), None, None, None),
+            logger: provider.logger_builder(service_name.to_string()).build(),
             std_err_enabled,
             host_name,
             service_name_with_iana_number,
@@ -114,8 +113,7 @@ pub(crate) fn init_logs(config: Config) -> Result<LoggerProvider, log::SetLogger
             keys.push(KeyValue::new(attribute.key, attribute.value));
         }
     }
-    let mut logger_provider_builder = LoggerProvider::builder()
-        .with_config(opentelemetry_sdk::logs::Config::default().with_resource(Resource::new(keys)));
+    let mut logger_provider_builder = LoggerProvider::builder().with_resource(Resource::new(keys));
 
     let host_name = nix::unistd::gethostname()
         .map(|hostname| {

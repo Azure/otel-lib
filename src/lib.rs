@@ -91,9 +91,9 @@ impl Otel {
             );
         }
 
-        if let Some(mut logger_provider) = self.logger_provider.clone() {
+        if let Some(logger_provider) = self.logger_provider.clone() {
             logger_provider.force_flush();
-            logger_provider.try_shutdown();
+            let _ = logger_provider.shutdown();
         }
     }
 }

@@ -16,6 +16,13 @@ The framework is configurable using the `Config` struct to setup
 * Enable logs to be emitted to stderr. These will show up as logs in the [syslog format](https://www.rfc-editor.org/rfc/rfc5424#page-8).
 
 #### How to set it up
+
+Add the following to your cargo.toml
+~~~
+opentelemetry = { version = "0.24", features = ["metrics", "logs"]}
+opentelemetry_sdk =  {version = "0.24", features = ["metrics", "logs", "rt-tokio", "logs_level_enabled"]}
+~~~
+
 Do the following as early as you can in your control flow
 ~~~
 // Configure
@@ -34,7 +41,7 @@ let log_targets = vec![LogsExportTarget {
 }];
 
 // Setup Prometheus if needed.
-let prometheus_config = Some(PrometheusConfig { port: 9090 });
+let prometheus_config = Some(Prometheus { port: 9090 });
 
 let config = Config {
     service_name: "myapp".to_owned(),

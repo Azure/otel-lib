@@ -24,6 +24,7 @@ use opentelemetry_sdk::{
 };
 
 use std::{
+    borrow::Cow,
     fmt::{self, Debug, Formatter},
     time::Duration,
 };
@@ -52,8 +53,10 @@ impl<R: RuntimeChannel> Debug for FilteredBatchLogProcessor<R> {
 }
 
 impl<R: RuntimeChannel> LogProcessor for FilteredBatchLogProcessor<R> {
-    fn emit(&self, data: LogData) {
-        let result = self.message_sender.try_send(BatchMessage::ExportLog(data));
+    fn emit(&self, data: &mut LogData) {
+        let result = self
+            .message_sender
+            .try_send(BatchMessage::ExportLog(data.clone()));
 
         if let Err(err) = result {
             global::handle_error(LogError::Other(err.into()));
@@ -71,7 +74,7 @@ impl<R: RuntimeChannel> LogProcessor for FilteredBatchLogProcessor<R> {
             .and_then(std::convert::identity)
     }
 
-    fn shutdown(&mut self) -> LogResult<()> {
+    fn shutdown(&self) -> LogResult<()> {
         let (res_sender, res_receiver) = oneshot::channel();
         self.message_sender
             .try_send(BatchMessage::Shutdown(res_sender))
@@ -116,7 +119,7 @@ impl<R: RuntimeChannel> FilteredBatchLogProcessor<R> {
                         // add log only if the severity is >= export_severity
                         if let Some(severity) = log.record.severity_number {
                             if severity >= config.export_severity {
-                                logs.push(log);
+                                logs.push(Cow::Owned(log));
                             } else {
                                 continue;
                             }
@@ -199,11 +202,11 @@ impl<R: RuntimeChannel> FilteredBatchLogProcessor<R> {
     }
 }
 
-async fn export_with_timeout<R, E>(
+async fn export_with_timeout<'a, R, E>(
     time_out: Duration,
     exporter: &mut E,
     runtime: &R,
-    batch: Vec<LogData>,
+    batch: Vec<Cow<'a, LogData>>,
 ) -> ExportResult
 where
     R: RuntimeChannel,

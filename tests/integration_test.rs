@@ -265,7 +265,7 @@ fn get_counter(
     match &metric.data.clone().unwrap() {
         opentelemetry_proto::tonic::metrics::v1::metric::Data::Sum(sum) => {
             let num_value = sum.data_points.first();
-            let num_value = num_value.unwrap().value.clone().unwrap();
+            let num_value = num_value.unwrap().value.unwrap();
             match num_value {
                 opentelemetry_proto::tonic::metrics::v1::number_data_point::Value::AsDouble(_) => {
                     panic!("expected int value")
