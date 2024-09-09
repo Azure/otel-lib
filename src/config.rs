@@ -72,6 +72,8 @@ pub struct MetricsExportTarget {
     pub timeout: u64,
     /// export temporality preference, defaults to cumulative if not specified.
     pub temporality: Option<Temporality>,
+    /// path to root ca cert
+    pub ca_cert_path: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -85,6 +87,8 @@ pub struct LogsExportTarget {
     pub timeout: u64,
     /// export severity - severity >= which to export
     pub export_severity: Option<Severity>,
+    /// path to root ca cert
+    pub ca_cert_path: Option<String>,
 }
 
 #[derive(Clone, Debug)]
@@ -132,12 +136,14 @@ mod tests {
             interval_secs: 1,
             timeout: 5,
             temporality: Some(Temporality::Cumulative),
+            ca_cert_path: None,
         }];
         let logs_targets = vec![LogsExportTarget {
             url: log_url,
             interval_secs: 1,
             timeout: 5,
             export_severity: Some(Severity::Error),
+            ca_cert_path: None,
         }];
 
         let config = Config {

@@ -21,7 +21,8 @@ mod metrics;
 
 #[tokio::main]
 async fn main() {
-    // App expects 2 parameters. 1) '-n' that controls the number of iterations, and 2) '-o' to specify an otel compatible repo.
+    // App expects 3 parameters. 1) '-n' that controls the number of iterations, 2) '-o' to specify an otel compatible repo
+    // 3) '-c' to specify the path to the CA cert.
     let args = Args::parse();
 
     let prometheus_config = Some(Prometheus { port: 9090 });
@@ -32,12 +33,14 @@ async fn main() {
                 interval_secs: 1,
                 timeout: 5,
                 temporality: Some(Temporality::Cumulative),
+                ca_cert_path: args.ca_cert_path.clone(),
             }];
             let logs_targets = vec![LogsExportTarget {
                 url,
                 interval_secs: 1,
                 timeout: 5,
                 export_severity: Some(Severity::Error),
+                ca_cert_path: args.ca_cert_path,
             }];
             (Some(metric_targets), Some(logs_targets))
         }
@@ -103,4 +106,8 @@ struct Args {
     /// Otel Repository URL
     #[arg(short, long)]
     pub otel_repo_url: Option<String>,
+
+    /// Otel Repository URL
+    #[arg(short, long)]
+    pub ca_cert_path: Option<String>,
 }

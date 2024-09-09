@@ -25,6 +25,7 @@ use opentelemetry_sdk::{
 };
 use opentelemetry_stdout::MetricsExporterBuilder;
 use prometheus::{Encoder, Registry, TextEncoder};
+use tonic::transport::{Certificate, ClientTlsConfig};
 
 use self::config::Config;
 
@@ -173,8 +174,28 @@ fn init_metrics(config: Config) -> (Option<PrometheusRegistry>, SdkMeterProvider
                     Box::new(DefaultTemporalitySelector::new())
                 };
 
-            let exporter = match opentelemetry_otlp::new_exporter()
-                .tonic()
+            let mut exporter_builder = opentelemetry_otlp::new_exporter().tonic();
+            if export_target.url.starts_with("https") || export_target.url.starts_with("grpcs") {
+                if let Some(ca_cert_path) = export_target.ca_cert_path {
+                    let ca_cert = std::fs::read(ca_cert_path);
+                    match ca_cert {
+                        Ok(ca_cert) => {
+                            let ca_cert = Certificate::from_pem(ca_cert);
+                            let tls_config = ClientTlsConfig::new().ca_certificate(ca_cert);
+                            exporter_builder = exporter_builder.with_tls_config(tls_config);
+                        }
+                        Err(e) => {
+                            error!("unable to load ca_cert_file {:?}", e);
+                            continue;
+                        }
+                    }
+                }
+            } else {
+                exporter_builder =
+                    exporter_builder.with_tls_config(ClientTlsConfig::new().with_native_roots());
+            }
+
+            let exporter = match exporter_builder
                 .with_export_config(export_config)
                 .build_metrics_exporter(
                     // TODO: Make this also part of config?

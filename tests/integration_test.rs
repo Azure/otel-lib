@@ -60,12 +60,14 @@ async fn end_to_end_test() {
             interval_secs: 1,
             timeout: 5,
             temporality: Some(Temporality::Cumulative),
+            ca_cert_path: None,
         },
         MetricsExportTarget {
             url: unfiltered_target.endpoint.clone(),
             interval_secs: 1,
             timeout: 5,
             temporality: Some(Temporality::Delta),
+            ca_cert_path: None,
         },
     ];
 
@@ -75,12 +77,14 @@ async fn end_to_end_test() {
             interval_secs: 1,
             timeout: 5,
             export_severity: Some(Severity::Error),
+            ca_cert_path: None,
         },
         LogsExportTarget {
             url: unfiltered_target.endpoint,
             interval_secs: 1,
             timeout: 5,
             export_severity: None,
+            ca_cert_path: None,
         },
     ];
 
