@@ -3,7 +3,12 @@
 
 #![warn(clippy::all, clippy::pedantic)]
 
-use std::net::SocketAddr;
+use std::{
+    fs::{read, remove_file, File},
+    io::Write,
+    net::SocketAddr,
+    path::PathBuf,
+};
 
 use opentelemetry_proto::tonic::collector::{
     logs::v1::{
@@ -17,7 +22,12 @@ use opentelemetry_proto::tonic::collector::{
 };
 
 use tokio::sync::mpsc::{self, Receiver, Sender};
-use tonic::{async_trait, transport::Server, Request, Response, Status};
+use tonic::{
+    async_trait,
+    transport::{Identity, Server, ServerTlsConfig},
+    Request, Response, Status,
+};
+use uuid::Uuid;
 
 pub struct MockServer {
     pub endpoint: String,
@@ -34,10 +44,15 @@ impl MockServer {
     /// # Panics
     ///
     /// Will panic if socketaddr parse fails
-    pub fn new(port: u16) -> Self {
+    pub fn new(port: u16, self_signed_cert: Option<SelfSignedCert>) -> Self {
         // Setup mock otlp server
         let socketaddr = format!("127.0.0.1:{port}");
-        let endpoint = format!("http://localhost:{port}");
+
+        let endpoint = if self_signed_cert.is_some() {
+            format!("https://localhost:{port}")
+        } else {
+            format!("http://localhost:{port}")
+        };
 
         let (metrics_tx, metrics_rx) = mpsc::channel(10);
         let (logs_tx, logs_rx) = mpsc::channel(10);
@@ -47,6 +62,7 @@ impl MockServer {
             shutdown_rx,
             metrics_tx,
             logs_tx,
+            self_signed_cert,
         );
 
         Self {
@@ -64,6 +80,7 @@ pub struct OtlpServer {
     shutdown_rx: Receiver<()>,
     echo_metric_tx: Sender<ExportMetricsServiceRequest>,
     echo_logs_tx: Sender<ExportLogsServiceRequest>,
+    self_signed_cert: Option<SelfSignedCert>,
 }
 
 impl OtlpServer {
@@ -72,12 +89,14 @@ impl OtlpServer {
         shutdown_rx: Receiver<()>,
         echo_metric_tx: Sender<ExportMetricsServiceRequest>,
         echo_logs_tx: Sender<ExportLogsServiceRequest>,
+        self_signed_cert: Option<SelfSignedCert>,
     ) -> Self {
         Self {
             endpoint,
             shutdown_rx,
             echo_metric_tx,
             echo_logs_tx,
+            self_signed_cert,
         }
     }
 
@@ -87,7 +106,17 @@ impl OtlpServer {
     /// Will panic if the port is already in use
     ///
     pub async fn run(self) {
-        let () = Server::builder()
+        let mut server_builder = Server::builder();
+
+        if let Some(self_signed_cert) = self.self_signed_cert {
+            let cert_bytes = read(&self_signed_cert.server_cert_path).unwrap();
+            let key_bytes = read(&self_signed_cert.server_key_path).unwrap();
+            let mut tls_config = ServerTlsConfig::new();
+            tls_config = tls_config.identity(Identity::from_pem(&cert_bytes, &key_bytes));
+            server_builder = server_builder.tls_config(tls_config).unwrap();
+        }
+
+        let () = server_builder
             .add_service(MetricsServiceServer::new(MockMetricsService::new(
                 self.echo_metric_tx,
             )))
@@ -102,6 +131,46 @@ impl OtlpServer {
 
 async fn recv_wrapper(mut receiver: Receiver<()>) {
     let _ = receiver.recv().await;
+}
+
+#[derive(Clone)]
+pub struct SelfSignedCert {
+    pub server_cert_path: PathBuf,
+    pub server_key_path: PathBuf,
+    pub ca_cert_path: PathBuf,
+}
+
+impl SelfSignedCert {
+    pub fn cleanup(&self) {
+        remove_file(&self.server_cert_path).unwrap();
+        remove_file(&self.server_key_path).unwrap();
+    }
+
+    pub fn get_ca_cert_path(&self) -> String {
+        self.ca_cert_path.to_string_lossy().into_owned()
+    }
+}
+
+pub fn generate_self_signed_cert() -> SelfSignedCert {
+    let prefix = Uuid::new_v4();
+    // Generate a self-signed cert and key
+    let cert =
+        rcgen::generate_simple_self_signed(vec!["localhost".into(), "127.0.0.1".into()]).unwrap();
+    let cert_pem = cert.serialize_pem().unwrap();
+    let cert_path = PathBuf::from(format!("./{prefix}_cert.pem"));
+    let mut cert_file = File::create(cert_path.clone()).unwrap();
+    cert_file.write_all(cert_pem.as_bytes()).unwrap();
+
+    let key_pem = cert.serialize_private_key_pem();
+    let key_path = PathBuf::from(format!("./{prefix}_key.pem"));
+    let mut key_file = File::create(key_path.clone()).unwrap();
+    key_file.write_all(key_pem.as_bytes()).unwrap();
+
+    SelfSignedCert {
+        server_cert_path: cert_path.clone(),
+        server_key_path: key_path,
+        ca_cert_path: cert_path,
+    }
 }
 
 struct MockLogsService {
