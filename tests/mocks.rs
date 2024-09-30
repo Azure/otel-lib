@@ -109,10 +109,10 @@ impl OtlpServer {
         let mut server_builder = Server::builder();
 
         if let Some(self_signed_cert) = self.self_signed_cert {
-            let cert_bytes = read(&self_signed_cert.server_cert_path).unwrap();
-            let key_bytes = read(&self_signed_cert.server_key_path).unwrap();
+            let cert_bytes = read(&self_signed_cert.server_cert).unwrap();
+            let key_bytes = read(&self_signed_cert.server_key).unwrap();
             let mut tls_config = ServerTlsConfig::new();
-            tls_config = tls_config.identity(Identity::from_pem(&cert_bytes, &key_bytes));
+            tls_config = tls_config.identity(Identity::from_pem(cert_bytes, key_bytes));
             server_builder = server_builder.tls_config(tls_config).unwrap();
         }
 
@@ -135,22 +135,32 @@ async fn recv_wrapper(mut receiver: Receiver<()>) {
 
 #[derive(Clone)]
 pub struct SelfSignedCert {
-    pub server_cert_path: PathBuf,
-    pub server_key_path: PathBuf,
-    pub ca_cert_path: PathBuf,
+    pub server_cert: PathBuf,
+    pub server_key: PathBuf,
+    pub ca_cert: PathBuf,
 }
 
 impl SelfSignedCert {
+    /// Clean up cert files
+    /// # Panics
+    ///
+    /// Will panic remove file fails
+    ///
     pub fn cleanup(&self) {
-        remove_file(&self.server_cert_path).unwrap();
-        remove_file(&self.server_key_path).unwrap();
+        remove_file(&self.server_cert).unwrap();
+        remove_file(&self.server_key).unwrap();
     }
 
+    #[must_use]
     pub fn get_ca_cert_path(&self) -> String {
-        self.ca_cert_path.to_string_lossy().into_owned()
+        self.ca_cert.to_string_lossy().into_owned()
     }
 }
-
+/// Convenience function to generate certs
+/// # Panics
+///
+/// Will panic if cert generation fails
+#[must_use]
 pub fn generate_self_signed_cert() -> SelfSignedCert {
     let prefix = Uuid::new_v4();
     // Generate a self-signed cert and key
@@ -167,9 +177,9 @@ pub fn generate_self_signed_cert() -> SelfSignedCert {
     key_file.write_all(key_pem.as_bytes()).unwrap();
 
     SelfSignedCert {
-        server_cert_path: cert_path.clone(),
-        server_key_path: key_path,
-        ca_cert_path: cert_path,
+        server_cert: cert_path.clone(),
+        server_key: key_path,
+        ca_cert: cert_path,
     }
 }
 

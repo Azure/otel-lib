@@ -38,6 +38,7 @@ mod mocks;
 // 4) validate that metrics are exported to both otlp servers and at avaialable at the prometheus endpoint
 // 5) validate that `warn` and `error` logs are exported to the unfiltered server and only `error` logs are exported to the filtered server.
 #[tokio::test]
+#[allow(clippy::too_many_lines)]
 async fn end_to_end_test() {
     // Setup mock otlp servers for filtered logs
     let self_signed_cert = generate_self_signed_cert();
@@ -171,7 +172,7 @@ async fn end_to_end_test() {
         _ = otel_long_running_task => {
             panic!("Otel component ended unexpectedly");
         },
-        _ = run_tests_task => {
+        () = run_tests_task => {
 
         }
     }
@@ -180,9 +181,10 @@ async fn end_to_end_test() {
 
     filtered_target.shutdown_tx.send(()).await.unwrap();
     unfiltered_target.shutdown_tx.send(()).await.unwrap();
-    self_signed_cert.cleanup();
+    let () = self_signed_cert.cleanup();
 }
 
+#[allow(clippy::too_many_arguments)]
 async fn run_tests(
     filtered_metrics_rx: Receiver<ExportMetricsServiceRequest>,
     filtered_metrics_with_tls_rx: Receiver<ExportMetricsServiceRequest>,
