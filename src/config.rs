@@ -72,7 +72,7 @@ pub struct MetricsExportTarget {
     pub timeout: u64,
     /// export temporality preference, defaults to cumulative if not specified.
     pub temporality: Option<Temporality>,
-    /// path to root ca cert
+    /// path to the ca cert
     pub ca_cert_path: Option<String>,
 }
 
