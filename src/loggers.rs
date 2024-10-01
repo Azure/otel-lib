@@ -9,7 +9,7 @@ use std::{
 use crate::{
     config::Config,
     filtered_log_processor::{FilteredBatchConfig, FilteredBatchLogProcessor},
-    syslog_writer, SERVICE_NAME_KEY,
+    handle_tls, syslog_writer, SERVICE_NAME_KEY,
 };
 use log::Level;
 use opentelemetry::{
@@ -21,7 +21,6 @@ use opentelemetry_sdk::{
     logs::{BatchConfigBuilder, BatchLogProcessor, LoggerProvider},
     runtime, Resource,
 };
-use tonic::transport::{Certificate, ClientTlsConfig};
 
 pub(crate) struct OtelLogBridge<P, L>
 where
@@ -127,25 +126,16 @@ pub(crate) fn init_logs(config: Config) -> Result<LoggerProvider, log::SetLogger
     if let Some(export_target_list) = config.log_export_targets {
         for export_target in export_target_list {
             let mut exporter_builder = opentelemetry_otlp::new_exporter().tonic();
-            if export_target.url.starts_with("https") || export_target.url.starts_with("grpcs") {
-                if let Some(ca_cert_path) = export_target.ca_cert_path {
-                    let ca_cert = std::fs::read(ca_cert_path);
-                    match ca_cert {
-                        Ok(ca_cert) => {
-                            let ca_cert = Certificate::from_pem(ca_cert);
-                            let tls_config = ClientTlsConfig::new().ca_certificate(ca_cert);
-                            exporter_builder = exporter_builder.with_tls_config(tls_config);
-                        }
-                        Err(e) => {
-                            eprintln!("unable to load ca_cert_file {e:?}");
-                            continue;
-                        }
-                    }
+            exporter_builder = match handle_tls(
+                exporter_builder,
+                &export_target.url,
+                export_target.ca_cert_path,
+            ) {
+                Ok(exporter_builder) => exporter_builder,
+                Err(_) => {
+                    continue;
                 }
-            } else {
-                exporter_builder =
-                    exporter_builder.with_tls_config(ClientTlsConfig::new().with_native_roots());
-            }
+            };
 
             let exporter = match exporter_builder
                 .with_endpoint(export_target.url.clone())
