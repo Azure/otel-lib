@@ -23,7 +23,10 @@ use opentelemetry_sdk::{
     },
     runtime, Resource,
 };
+
+// TODO: evaluate if we should keep supporting writing metrics to stdout. 
 use opentelemetry_stdout::MetricsExporterBuilder;
+
 use prometheus::{Encoder, Registry, TextEncoder};
 use tonic::transport::{Certificate, ClientTlsConfig};
 
@@ -284,6 +287,10 @@ fn handle_tls(
                 Ok(ca_cert) => {
                     let ca_cert = Certificate::from_pem(ca_cert);
                     let tls_config = ClientTlsConfig::new().ca_certificate(ca_cert);
+                    // TODO: Evaluate using an alternative mechanism for TLS to use OpenSSL instead of rustls.
+                    // This could mean using `with_channel` instead of `with_tls_config` or switching away
+                    // from gRPC to JSON/HTTPS.
+
                     Ok(exporter_builder.with_tls_config(tls_config))
                 }
                 Err(e) => {
