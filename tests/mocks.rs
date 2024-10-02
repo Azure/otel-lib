@@ -77,6 +77,8 @@ impl AsyncWrite for TlsStream {
 
 pub async fn recv_wrapper(mut receiver: Receiver<()>) {
     if receiver.recv().await.is_none() {
+        // Note: We need to use eprintln! and not the log macros here as the tests
+        // create and assert on specific logs.
         eprintln!("shutdown channel closed unexpectedly");
     }
 }
@@ -159,7 +161,6 @@ impl OtlpServer {
     ///
     pub async fn run(self) {
         let mut server_builder = Server::builder();
-        // Use port 0 so the OS will assign an available port
         let listener = TcpListener::bind(self.endpoint).await.unwrap();
 
         if let Some(self_signed_cert) = self.self_signed_cert {
@@ -178,6 +179,8 @@ impl OtlpServer {
                     let (stream, _) = match listener.accept().await {
                         Ok(s) => s,
                         Err(e) => {
+                            // Note: We need to use eprintln! and not the log macros here as the tests
+                            // create and assert on specific logs.
                             eprintln!("failed to accept TCP connection: {e:?}");
                             continue;
                         }
