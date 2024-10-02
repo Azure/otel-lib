@@ -4,12 +4,16 @@
 #![warn(clippy::all, clippy::pedantic)]
 
 use std::{
-    fs::{read, remove_file, File},
+    fs::{remove_file, File},
     io::Write,
     net::SocketAddr,
     path::PathBuf,
+    pin::Pin,
+    sync::Arc,
+    task::{Context, Poll},
 };
 
+use openssl::ssl::{Ssl, SslAcceptor, SslFiletype, SslMethod};
 use opentelemetry_proto::tonic::collector::{
     logs::v1::{
         logs_service_server::{LogsService, LogsServiceServer},
@@ -21,13 +25,61 @@ use opentelemetry_proto::tonic::collector::{
     },
 };
 
-use tokio::sync::mpsc::{self, Receiver, Sender};
+use tokio::{
+    io::{AsyncRead, AsyncWrite, ReadBuf},
+    net::{TcpListener, TcpStream},
+    sync::mpsc::{self, Receiver, Sender},
+};
+use tokio_openssl::SslStream;
+use tokio_stream::wrappers::TcpListenerStream;
 use tonic::{
     async_trait,
-    transport::{Identity, Server, ServerTlsConfig},
+    transport::{server::Connected, Server},
     Request, Response, Status,
 };
 use uuid::Uuid;
+pub struct TlsStream(pub SslStream<TcpStream>);
+impl Connected for TlsStream {
+    type ConnectInfo = std::net::SocketAddr;
+
+    fn connect_info(&self) -> Self::ConnectInfo {
+        self.0.get_ref().peer_addr().unwrap()
+    }
+}
+
+impl AsyncRead for TlsStream {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &mut ReadBuf<'_>,
+    ) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.get_mut().0).poll_read(cx, buf)
+    }
+}
+
+impl AsyncWrite for TlsStream {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut Context<'_>,
+        buf: &[u8],
+    ) -> Poll<std::io::Result<usize>> {
+        Pin::new(&mut self.get_mut().0).poll_write(cx, buf)
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.get_mut().0).poll_flush(cx)
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<std::io::Result<()>> {
+        Pin::new(&mut self.get_mut().0).poll_shutdown(cx)
+    }
+}
+
+pub async fn recv_wrapper(mut receiver: Receiver<()>) {
+    if receiver.recv().await.is_none() {
+        eprintln!("shutdown channel closed unexpectedly");
+    }
+}
 
 pub struct MockServer {
     pub endpoint: String,
@@ -107,30 +159,81 @@ impl OtlpServer {
     ///
     pub async fn run(self) {
         let mut server_builder = Server::builder();
+        // Use port 0 so the OS will assign an available port
+        let listener = TcpListener::bind(self.endpoint).await.unwrap();
 
         if let Some(self_signed_cert) = self.self_signed_cert {
-            let cert_bytes = read(&self_signed_cert.server_cert).unwrap();
-            let key_bytes = read(&self_signed_cert.server_key).unwrap();
-            let mut tls_config = ServerTlsConfig::new();
-            tls_config = tls_config.identity(Identity::from_pem(cert_bytes, key_bytes));
-            server_builder = server_builder.tls_config(tls_config).unwrap();
+            let mut ssl_builder = SslAcceptor::mozilla_modern(SslMethod::tls()).unwrap();
+            ssl_builder
+                .set_private_key_file(self_signed_cert.server_key.clone(), SslFiletype::PEM)
+                .unwrap();
+            ssl_builder
+                .set_certificate_chain_file(self_signed_cert.server_cert.clone())
+                .unwrap();
+            let ssl_acceptor = Arc::new(ssl_builder.build());
+
+            // Create async incoming TLS stream listener
+            let incoming = async_stream::stream! {
+                loop {
+                    let (stream, _) = match listener.accept().await {
+                        Ok(s) => s,
+                        Err(e) => {
+                            eprintln!("failed to accept TCP connection: {e:?}");
+                            continue;
+                        }
+                    };
+                    let ssl = match Ssl::new(ssl_acceptor.context()) {
+                        Ok(ssl) => ssl,
+                        Err(e) => {
+                            eprintln!("failed to create Ssl object: {e:?}");
+                            continue;
+                        }
+                    };
+
+                    let mut ssl_stream = match SslStream::new(ssl, stream) {
+                        Ok(ssl_stream) => ssl_stream,
+                        Err(e) => {
+                            eprintln!("failed to create SslStream: {e:?}");
+                            continue;
+                        }
+                    };
+
+                    if let Err(e) = Pin::new(&mut ssl_stream).accept().await {
+                        eprintln!("failed to accept TLS connection: {e:?}");
+                        continue;
+                    }
+                    let tls_stream = TlsStream(ssl_stream);
+                    yield Ok::<TlsStream, std::io::Error>(tls_stream);
+                }
+            };
+
+            let () = server_builder
+                .add_service(MetricsServiceServer::new(MockMetricsService::new(
+                    self.echo_metric_tx,
+                )))
+                .add_service(LogsServiceServer::new(MockLogsService::new(
+                    self.echo_logs_tx,
+                )))
+                .serve_with_incoming_shutdown(incoming, recv_wrapper(self.shutdown_rx))
+                .await
+                .unwrap();
+        } else {
+            // Create incoming TCP stream listener
+            let incoming = TcpListenerStream::new(listener);
+
+            // Start the server
+            server_builder
+                .add_service(MetricsServiceServer::new(MockMetricsService::new(
+                    self.echo_metric_tx,
+                )))
+                .add_service(LogsServiceServer::new(MockLogsService::new(
+                    self.echo_logs_tx,
+                )))
+                .serve_with_incoming_shutdown(incoming, recv_wrapper(self.shutdown_rx))
+                .await
+                .unwrap();
         }
-
-        let () = server_builder
-            .add_service(MetricsServiceServer::new(MockMetricsService::new(
-                self.echo_metric_tx,
-            )))
-            .add_service(LogsServiceServer::new(MockLogsService::new(
-                self.echo_logs_tx,
-            )))
-            .serve_with_shutdown(self.endpoint, recv_wrapper(self.shutdown_rx))
-            .await
-            .unwrap();
     }
-}
-
-async fn recv_wrapper(mut receiver: Receiver<()>) {
-    let _ = receiver.recv().await;
 }
 
 #[derive(Clone)]

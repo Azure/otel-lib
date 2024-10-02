@@ -4,11 +4,13 @@
 #![deny(rust_2018_idioms)]
 #![warn(clippy::all, clippy::pedantic)]
 
-use std::time::Duration;
-
-use log::{error, info, warn};
+use std::{path::PathBuf, sync::Arc, time::Duration};
 
 use hyper::StatusCode;
+use hyper_util::rt::TokioIo;
+use log::{error, info, warn};
+
+use openssl::ssl::{SslConnector, SslConnectorBuilder, SslMethod};
 use opentelemetry::{global, KeyValue};
 
 use axum::{http, Extension};
@@ -28,7 +30,9 @@ use opentelemetry_sdk::{
 use opentelemetry_stdout::MetricsExporterBuilder;
 
 use prometheus::{Encoder, Registry, TextEncoder};
-use tonic::transport::{Certificate, ClientTlsConfig};
+use tokio::net::TcpStream;
+use tokio_openssl::SslStream;
+use url::Url;
 
 use self::config::Config;
 
@@ -279,29 +283,120 @@ fn handle_tls(
     exporter_builder: TonicExporterBuilder,
     url: &str,
     ca_cert_path: Option<String>,
-) -> Result<TonicExporterBuilder, std::io::Error> {
-    if url.starts_with("https") || url.starts_with("grpcs") {
-        if let Some(ca_cert_path) = ca_cert_path {
-            let ca_cert = std::fs::read(ca_cert_path);
-            match ca_cert {
-                Ok(ca_cert) => {
-                    let ca_cert = Certificate::from_pem(ca_cert);
-                    let tls_config = ClientTlsConfig::new().ca_certificate(ca_cert);
-                    // TODO: Evaluate using an alternative mechanism for TLS to use OpenSSL instead of rustls.
-                    // This could mean using `with_channel` instead of `with_tls_config` or switching away
-                    // from gRPC to JSON/HTTPS.
+) -> Result<TonicExporterBuilder, ObsError> {
+    let ep = Endpoint::new(url, ca_cert_path.clone()).unwrap();
+    let timeout = Duration::from_secs(30); // TODO: Make this timeout configurable
+    let addr = format!("{}:{}", ep.server_name(), ep.server_port());
+    let server_name = ep.server_name().to_owned();
+    let scheme = ep.url().scheme();
 
-                    Ok(exporter_builder.with_tls_config(tls_config))
-                }
-                Err(e) => {
-                    error!("unable to load ca_cert_file {:?}", e);
-                    Err(e)
-                }
-            }
+    if scheme.eq("https") || scheme.eq("grpcs") {
+        let url_modified = ep.url().to_string().replace("https", "http");
+        let tonic_endpoint = tonic::transport::channel::Endpoint::try_from(url_modified).unwrap();
+        let method = SslMethod::tls();
+        let mut ssl_connector: SslConnectorBuilder = SslConnector::builder(method).unwrap();
+        if let Some(ca_cert_path) = ca_cert_path {
+            ssl_connector
+                .set_ca_file(ca_cert_path.clone())
+                .map_err(|e| {
+                    ObsError::GrpcClientError(format!(
+                        "error setting CA file to {ca_cert_path:?}: {e}"
+                    ))
+                })?;
         } else {
-            Ok(exporter_builder)
+            ssl_connector.set_default_verify_paths().map_err(|e| {
+                ObsError::GrpcClientError(format!("error setting default verify paths: {e}"))
+            })?;
         }
+
+        // Create a custom tonic connector that uses openssl instead of rustls
+        let ssl_connector = Arc::new(ssl_connector.build());
+        let custom_connector = tower::service_fn(move |_: tonic::transport::Uri| {
+            let connector = Arc::clone(&ssl_connector);
+            let addr = addr.clone();
+            let server_name = server_name.clone();
+            async move {
+                let tcp_stream = TcpStream::connect(addr.clone()).await?;
+                let config = connector.configure()?;
+                let ssl = config.into_ssl(&server_name)?;
+                let mut ssl_stream = SslStream::new(ssl, tcp_stream)?;
+                std::pin::Pin::new(&mut ssl_stream).connect().await?;
+                Ok::<_, ObsError>(TokioIo::new(ssl_stream))
+            }
+        });
+        let channel = tonic_endpoint
+            .timeout(timeout)
+            .connect_with_connector_lazy(custom_connector);
+        Ok(exporter_builder.with_channel(channel))
     } else {
-        Ok(exporter_builder.with_tls_config(ClientTlsConfig::new().with_native_roots()))
+        Ok(exporter_builder)
     }
+}
+
+#[derive(Clone, Debug, PartialEq)]
+struct Endpoint {
+    server_name: String,
+    server_port: u16,
+    trusted_ca_path: Option<PathBuf>,
+    url: Url,
+}
+
+impl Endpoint {
+    fn new(url: &str, trusted_ca_path: Option<String>) -> Result<Self, ObsError> {
+        let url = Url::parse(url).map_err(ObsError::InvalidEndpointUrl)?;
+        let server_name = url
+            .host_str()
+            .ok_or(ObsError::EndpointMissingHost(url.to_string()))?;
+        let server_port = url
+            .port()
+            .ok_or(ObsError::EndpointMissingPort(url.to_string()))?;
+        Ok(Self {
+            server_name: server_name.to_owned(),
+            server_port,
+            trusted_ca_path: trusted_ca_path.map(PathBuf::from),
+            url,
+        })
+    }
+
+    fn server_name(&self) -> &str {
+        &self.server_name
+    }
+
+    fn server_port(&self) -> u16 {
+        self.server_port
+    }
+
+    fn url(&self) -> &Url {
+        &self.url
+    }
+}
+
+#[derive(Debug, thiserror::Error)]
+pub enum ObsError {
+    #[error("gRPC client error: {0:}")]
+    GrpcClientError(String),
+
+    #[error("io error: {0:?}")]
+    IoError(#[from] std::io::Error),
+
+    #[error("failed to create TLS server config: {0:?}")]
+    TlsServerConfig(#[from] openssl::error::ErrorStack),
+
+    #[error("tokio decoder failed: {0:?}")]
+    TokioDecoderError(String),
+
+    #[error("file does not contain a private key in a supported encoding")]
+    NoSupportedPrivateKeyFound,
+
+    #[error("tls handshake error {0:?}")]
+    TlsError(#[from] openssl::ssl::Error),
+
+    #[error("could not parse endpoint url: {0:?}")]
+    InvalidEndpointUrl(#[source] url::ParseError),
+
+    #[error("could not parse port from endpoint: {0:?}")]
+    EndpointMissingPort(String),
+
+    #[error("could not parse host from endpoint: {0:?}")]
+    EndpointMissingHost(String),
 }
