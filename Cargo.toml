@@ -19,7 +19,7 @@ log = { version = "0.4", default-features = false }
 nix = { version = "0.27", default-features = false, features = [
 	"process", "hostname",
 ] }
-openssl = "0.10.66"
+openssl = "0.10"
 opentelemetry = { version = "0.24", features = ["metrics", "logs"]}
 opentelemetry-otlp = { version ="0.17", features = ["grpc-tonic","metrics", "logs"]}
 opentelemetry-prometheus = {version = "0.17" }
@@ -35,7 +35,7 @@ serde_json = { version = "1.0", default-features = false, features = [
 ] }
 thiserror = "1.0"
 tokio = "1.40"
-tokio-openssl = "0.6.5"
+tokio-openssl = "0.6"
 tonic = { version = "0.12" }
 tower = {version = "0.5", features = ["util"]}
 url = "2"
