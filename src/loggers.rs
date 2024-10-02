@@ -130,6 +130,7 @@ pub(crate) fn init_logs(config: Config) -> Result<LoggerProvider, log::SetLogger
                 exporter_builder,
                 &export_target.url,
                 export_target.ca_cert_path,
+                Duration::from_secs(export_target.timeout),
             ) {
                 Ok(exporter_builder) => exporter_builder,
                 Err(_) => {

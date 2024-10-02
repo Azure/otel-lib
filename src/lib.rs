@@ -4,7 +4,7 @@
 #![deny(rust_2018_idioms)]
 #![warn(clippy::all, clippy::pedantic)]
 
-use std::{path::PathBuf, sync::Arc, time::Duration};
+use std::{sync::Arc, time::Duration};
 
 use hyper::StatusCode;
 use hyper_util::rt::TokioIo;
@@ -186,6 +186,7 @@ fn init_metrics(config: Config) -> (Option<PrometheusRegistry>, SdkMeterProvider
                 exporter_builder,
                 &export_target.url,
                 export_target.ca_cert_path,
+                Duration::from_secs(export_target.timeout),
             ) {
                 Ok(exporter_builder) => exporter_builder,
                 Err(_) => {
@@ -283,29 +284,55 @@ fn handle_tls(
     exporter_builder: TonicExporterBuilder,
     url: &str,
     ca_cert_path: Option<String>,
-) -> Result<TonicExporterBuilder, ObsError> {
-    let ep = Endpoint::new(url, ca_cert_path.clone()).unwrap();
-    let timeout = Duration::from_secs(30); // TODO: Make this timeout configurable
-    let addr = format!("{}:{}", ep.server_name(), ep.server_port());
-    let server_name = ep.server_name().to_owned();
-    let scheme = ep.url().scheme();
+    timeout: Duration,
+) -> Result<TonicExporterBuilder, OtelError> {
+    let (server_name, server_port, scheme) = {
+        let url = Url::parse(url).map_err(OtelError::InvalidEndpointUrl)?;
+        let server_name = url
+            .host_str()
+            .ok_or(OtelError::EndpointMissingHost(url.to_string()))?
+            .to_owned();
+        let server_port = url
+            .port()
+            .ok_or(OtelError::EndpointMissingPort(url.to_string()))?;
+        (server_name, server_port, url.scheme().to_owned())
+    };
+
+    let addr = format!("{server_name}:{server_port}");
 
     if scheme.eq("https") || scheme.eq("grpcs") {
-        let url_modified = ep.url().to_string().replace("https", "http");
-        let tonic_endpoint = tonic::transport::channel::Endpoint::try_from(url_modified).unwrap();
+        // replace https with http to avoid tonic bug that incorrectly assumes TLS is disabled when
+        // not using rustls to establish TLS connection (i.e. when using connect_with_connector_lazy()).
+        let url_modified = if scheme.eq("https") {
+            url.replace("https", "http")
+        } else {
+            url.replace("grpcs", "grpc")
+        };
+
+        let tonic_endpoint = tonic::transport::channel::Endpoint::try_from(url_modified.clone())
+            .map_err(|e| {
+                OtelError::GrpcClientError(format!(
+                    "error creating tonic channel to {url_modified}: {e:?}",
+                ))
+            })?;
+
         let method = SslMethod::tls();
-        let mut ssl_connector: SslConnectorBuilder = SslConnector::builder(method).unwrap();
+        let mut ssl_connector: SslConnectorBuilder =
+            SslConnector::builder(method).map_err(|e| {
+                OtelError::GrpcClientError(format!("error creating SSL connector: {e:?}"))
+            })?;
+
         if let Some(ca_cert_path) = ca_cert_path {
             ssl_connector
                 .set_ca_file(ca_cert_path.clone())
                 .map_err(|e| {
-                    ObsError::GrpcClientError(format!(
+                    OtelError::GrpcClientError(format!(
                         "error setting CA file to {ca_cert_path:?}: {e}"
                     ))
                 })?;
         } else {
             ssl_connector.set_default_verify_paths().map_err(|e| {
-                ObsError::GrpcClientError(format!("error setting default verify paths: {e}"))
+                OtelError::GrpcClientError(format!("error setting default verify paths: {e}"))
             })?;
         }
 
@@ -321,7 +348,7 @@ fn handle_tls(
                 let ssl = config.into_ssl(&server_name)?;
                 let mut ssl_stream = SslStream::new(ssl, tcp_stream)?;
                 std::pin::Pin::new(&mut ssl_stream).connect().await?;
-                Ok::<_, ObsError>(TokioIo::new(ssl_stream))
+                Ok::<_, OtelError>(TokioIo::new(ssl_stream))
             }
         });
         let channel = tonic_endpoint
@@ -333,46 +360,8 @@ fn handle_tls(
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-struct Endpoint {
-    server_name: String,
-    server_port: u16,
-    trusted_ca_path: Option<PathBuf>,
-    url: Url,
-}
-
-impl Endpoint {
-    fn new(url: &str, trusted_ca_path: Option<String>) -> Result<Self, ObsError> {
-        let url = Url::parse(url).map_err(ObsError::InvalidEndpointUrl)?;
-        let server_name = url
-            .host_str()
-            .ok_or(ObsError::EndpointMissingHost(url.to_string()))?;
-        let server_port = url
-            .port()
-            .ok_or(ObsError::EndpointMissingPort(url.to_string()))?;
-        Ok(Self {
-            server_name: server_name.to_owned(),
-            server_port,
-            trusted_ca_path: trusted_ca_path.map(PathBuf::from),
-            url,
-        })
-    }
-
-    fn server_name(&self) -> &str {
-        &self.server_name
-    }
-
-    fn server_port(&self) -> u16 {
-        self.server_port
-    }
-
-    fn url(&self) -> &Url {
-        &self.url
-    }
-}
-
 #[derive(Debug, thiserror::Error)]
-pub enum ObsError {
+pub enum OtelError {
     #[error("gRPC client error: {0:}")]
     GrpcClientError(String),
 
@@ -381,12 +370,6 @@ pub enum ObsError {
 
     #[error("failed to create TLS server config: {0:?}")]
     TlsServerConfig(#[from] openssl::error::ErrorStack),
-
-    #[error("tokio decoder failed: {0:?}")]
-    TokioDecoderError(String),
-
-    #[error("file does not contain a private key in a supported encoding")]
-    NoSupportedPrivateKeyFound,
 
     #[error("tls handshake error {0:?}")]
     TlsError(#[from] openssl::ssl::Error),
