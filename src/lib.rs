@@ -24,7 +24,7 @@ use opentelemetry_sdk::{
     runtime, Resource,
 };
 
-// TODO: evaluate if we should keep supporting writing metrics to stdout. 
+// TODO: evaluate if we should keep supporting writing metrics to stdout.
 use opentelemetry_stdout::MetricsExporterBuilder;
 
 use prometheus::{Encoder, Registry, TextEncoder};
