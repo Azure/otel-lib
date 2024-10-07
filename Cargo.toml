@@ -9,6 +9,7 @@ edition = "2021"
 [dependencies]
 axum = "0.6"
 env_filter = "0.1"
+futures = "0.3"
 futures-channel = "0.3"
 futures-executor = "0.3"
 futures-util = "0.3"
@@ -16,6 +17,7 @@ humantime = "2.1"
 hyper = { version = "0.14", features = ["http1", "server"] }
 hyper-util = "0.1"
 log = { version = "0.4", default-features = false }
+notify = "6"
 nix = { version = "0.27", default-features = false, features = [
 	"process", "hostname",
 ] }
