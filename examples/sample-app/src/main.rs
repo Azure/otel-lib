@@ -62,7 +62,7 @@ async fn main() {
         ..Config::default()
     };
 
-    let otel_component = Otel::new(config);
+    let mut otel_component = Otel::new(config);
     // Start the otel running task
     let otel_long_running_task = otel_component.run();
     // initialize static metrics
@@ -93,7 +93,7 @@ async fn main() {
     });
 
     let _ = join!(instrumentation_task, otel_long_running_task);
-    otel_component.shutdown();
+    otel_component.shutdown().await;
 }
 
 #[derive(Parser, Debug)]

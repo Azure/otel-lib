@@ -7,7 +7,6 @@
 
 use std::fs::OpenOptions;
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
 use filetime::{set_file_mtime, FileTime};
@@ -26,7 +25,6 @@ use otel_lib::{
 };
 use port_check::free_local_port_in_range;
 use tokio::sync::mpsc::Receiver;
-use tokio::sync::Mutex;
 use tokio::time::timeout;
 
 mod mocks;
@@ -156,9 +154,8 @@ async fn end_to_end_test() {
         ..Config::default()
     };
 
-    let otel_component = Arc::new(Mutex::new(Otel::new(config)));
-    let otel_long_running_task =
-        tokio::spawn(async move { otel_component.lock().await.run().await });
+    let mut otel_component = Otel::new(config);
+    let otel_long_running_task = tokio::spawn(async move { otel_component.run().await });
     let run_tests_task = run_tests(
         filtered_target.metrics_rx,
         filtered_target_with_tls.metrics_rx,

@@ -122,13 +122,13 @@ impl Otel {
                         info!("CA cert path changed: {event:?}");
                     }
                     Some(Err(e)) => {
-                        error!("error received from CA file watcher: {e}");
+                        error!("error received from CA file watcher: {e:?}");
                     }
                     None => {
                         warn!("CA file watcher channel closed.");
                     }
                 }
-                info!("Exiting to allow restart of component.");
+                warn!("Exiting to allow restart of component.");
                 return Err(OtelError::CaWatcherEvent)
             }
             () = async {
@@ -139,7 +139,7 @@ impl Otel {
                     ).await;
                 }
             }, if self.registry.is_some() => {
-                info!("prometheus server stopped. Exiting.");
+                warn!("prometheus server stopped. Exiting.");
                 return Err(OtelError::PrometheusServerStopped)
             }
             _ = self.shutdown_rx.recv() => {
