@@ -18,6 +18,7 @@ hyper = { version = "0.14", features = ["http1", "server"] }
 hyper-util = "0.1"
 log = { version = "0.4", default-features = false }
 notify = "6"
+notify-debouncer-mini = "0.4"
 nix = { version = "0.27", default-features = false, features = [
 	"process", "hostname",
 ] }
@@ -45,6 +46,7 @@ url = "2"
 [dev-dependencies]
 async-stream = "0.3"
 async-trait = "0.1"
+filetime = "0.2"
 opentelemetry-proto = { version = "0.7", features = ["gen-tonic", "metrics", "logs"] }
 port_check="0.2"
 prost = "0.13"
@@ -79,3 +81,7 @@ struct_field_names = "allow"
 too_many_arguments = "allow"
 too_many_lines = "allow"
 type_complexity = "allow"
+
+[features]
+tests = []
+integration = []
