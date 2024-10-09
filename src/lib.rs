@@ -112,7 +112,7 @@ impl Otel {
             let _ = ca_watcher
                 .watcher()
                 .watch(&PathBuf::from(path), RecursiveMode::NonRecursive);
-            debug!("watching for changes to {path}");
+            debug!("watching for changes to {}", path);
         });
 
         tokio::select! {
@@ -139,7 +139,7 @@ impl Otel {
                     ).await;
                 }
             }, if self.registry.is_some() => {
-                warn!("prometheus server stopped. Exiting.");
+                error!("prometheus server stopped. Exiting.");
                 return Err(OtelError::PrometheusServerStopped)
             }
             _ = self.shutdown_rx.recv() => {
