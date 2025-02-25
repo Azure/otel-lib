@@ -216,11 +216,11 @@ impl<R: RuntimeChannel> FilteredBatchLogProcessor<R> {
     }
 }
 
-async fn export_with_timeout<'a, R, E>(
+async fn export_with_timeout<R, E>(
     time_out: Duration,
     exporter: &mut E,
     runtime: &R,
-    batch: Vec<Cow<'a, LogData>>,
+    batch: Vec<Cow<'_, LogData>>,
 ) -> ExportResult
 where
     R: RuntimeChannel,
