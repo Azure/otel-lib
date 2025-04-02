@@ -202,7 +202,6 @@ fn create_watcher() -> Result<
 
 #[derive(Default, Debug)]
 /// A temporality selector that returns Delta for all instruments
-
 pub(crate) struct DeltaTemporalitySelector {}
 
 impl DeltaTemporalitySelector {
