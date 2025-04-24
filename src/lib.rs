@@ -401,9 +401,8 @@ fn handle_tls(
     let addr = format!("{server_name}:{server_port}");
 
     if scheme.eq("https") || scheme.eq("grpcs") {
-        let url = url.to_owned();
         let tonic_endpoint =
-            tonic::transport::channel::Endpoint::try_from(url.clone()).map_err(|e| {
+            tonic::transport::channel::Endpoint::try_from(url.to_owned()).map_err(|e| {
                 OtelError::GrpcClientError(format!("error creating tonic channel to {url}: {e:?}",))
             })?;
 
