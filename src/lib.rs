@@ -401,29 +401,20 @@ fn handle_tls(
     let addr = format!("{server_name}:{server_port}");
 
     if scheme.eq("https") || scheme.eq("grpcs") {
-        // replace https with http to avoid tonic bug that incorrectly assumes TLS is disabled when
-        // not using rustls to establish TLS connection (i.e. when using connect_with_connector_lazy()).
-        let url_modified = if scheme.eq("https") {
-            url.replace("https", "http")
-        } else {
-            url.replace("grpcs", "grpc")
-        };
-
-        let tonic_endpoint = tonic::transport::channel::Endpoint::try_from(url_modified.clone())
-            .map_err(|e| {
-                OtelError::GrpcClientError(format!(
-                    "error creating tonic channel to {url_modified}: {e:?}",
-                ))
+        let url = url.to_owned();
+        let tonic_endpoint =
+            tonic::transport::channel::Endpoint::try_from(url.clone()).map_err(|e| {
+                OtelError::GrpcClientError(format!("error creating tonic channel to {url}: {e:?}",))
             })?;
 
         let method = SslMethod::tls();
-        let mut ssl_connector: SslConnectorBuilder =
-            SslConnector::builder(method).map_err(|e| {
+        let mut ssl_connector_builder: SslConnectorBuilder = SslConnector::builder(method)
+            .map_err(|e| {
                 OtelError::GrpcClientError(format!("error creating SSL connector: {e:?}"))
             })?;
 
         if let Some(ca_cert_path) = ca_cert_path {
-            ssl_connector
+            ssl_connector_builder
                 .set_ca_file(ca_cert_path.clone())
                 .map_err(|e| {
                     OtelError::GrpcClientError(format!(
@@ -431,13 +422,22 @@ fn handle_tls(
                     ))
                 })?;
         } else {
-            ssl_connector.set_default_verify_paths().map_err(|e| {
-                OtelError::GrpcClientError(format!("error setting default verify paths: {e}"))
-            })?;
+            ssl_connector_builder
+                .set_default_verify_paths()
+                .map_err(|e| {
+                    OtelError::GrpcClientError(format!("error setting default verify paths: {e}"))
+                })?;
         }
 
+        // Set ALPN property for HTTP/2 over TLS
+        ssl_connector_builder
+            .set_alpn_protos(b"\x02h2")
+            .map_err(|e| {
+                OtelError::GrpcClientError(format!("error setting `h2` ALPN Header: {e}"))
+            })?;
+
         // Create a custom tonic connector that uses openssl instead of rustls
-        let ssl_connector = Arc::new(ssl_connector.build());
+        let ssl_connector = Arc::new(ssl_connector_builder.build());
         let custom_connector = tower::service_fn(move |_: tonic::transport::Uri| {
             let connector = Arc::clone(&ssl_connector);
             let addr = addr.clone();
