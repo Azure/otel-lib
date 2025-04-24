@@ -428,7 +428,7 @@ fn handle_tls(
                 })?;
         }
 
-        // Set ALPN property for HTTP/2 over TLS
+        // Set ALPN property for HTTP/2 over TLS as per RFC 7540. See `https://datatracker.ietf.org/doc/html/rfc7540#section-3.3`
         ssl_connector_builder
             .set_alpn_protos(b"\x02h2")
             .map_err(|e| {
