@@ -4,7 +4,7 @@
 #![warn(clippy::all, clippy::pedantic)]
 
 use std::{
-    fs::{remove_file, File},
+    fs::{File, remove_file},
     io::{Read, Write},
     net::SocketAddr,
     path::PathBuf,
@@ -16,12 +16,12 @@ use std::{
 use openssl::ssl::{Ssl, SslAcceptor, SslFiletype, SslMethod};
 use opentelemetry_proto::tonic::collector::{
     logs::v1::{
-        logs_service_server::{LogsService, LogsServiceServer},
         ExportLogsServiceRequest, ExportLogsServiceResponse,
+        logs_service_server::{LogsService, LogsServiceServer},
     },
     metrics::v1::{
-        metrics_service_server::{MetricsService, MetricsServiceServer},
         ExportMetricsServiceRequest, ExportMetricsServiceResponse,
+        metrics_service_server::{MetricsService, MetricsServiceServer},
     },
 };
 
@@ -33,10 +33,9 @@ use tokio::{
 use tokio_openssl::SslStream;
 use tokio_stream::wrappers::TcpListenerStream;
 use tonic::{
-    async_trait,
+    Request, Response, Status, async_trait,
     service::interceptor,
-    transport::{server::Connected, Server},
-    Request, Response, Status,
+    transport::{Server, server::Connected},
 };
 use tower::ServiceBuilder;
 use uuid::Uuid;

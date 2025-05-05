@@ -11,7 +11,7 @@ use crate::runtime::{RuntimeChannel, TrySend};
 use futures_channel::oneshot;
 use futures_util::{
     future::{self, Either},
-    {pin_mut, stream, StreamExt as _},
+    {StreamExt as _, pin_mut, stream},
 };
 
 use opentelemetry::{
@@ -19,9 +19,9 @@ use opentelemetry::{
     logs::{LogError, LogResult, Severity},
 };
 use opentelemetry_sdk::{
+    Resource,
     export::logs::{ExportResult, LogData, LogExporter},
     logs::LogProcessor,
-    Resource,
 };
 
 use std::{

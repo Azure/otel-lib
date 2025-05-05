@@ -7,19 +7,21 @@ use std::{
 };
 
 use crate::{
+    AuthIntercepter, SERVICE_NAME_KEY,
     config::Config,
     filtered_log_processor::{FilteredBatchConfig, FilteredBatchLogProcessor},
-    handle_tls, syslog_writer, AuthIntercepter, SERVICE_NAME_KEY,
+    handle_tls, syslog_writer,
 };
 use log::Level;
 use opentelemetry::{
-    logs::{AnyValue, LogRecord, Logger, Severity},
     KeyValue,
+    logs::{AnyValue, LogRecord, Logger, Severity},
 };
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::{
+    Resource,
     logs::{BatchConfigBuilder, BatchLogProcessor, LoggerProvider},
-    runtime, Resource,
+    runtime,
 };
 
 pub(crate) struct OtelLogBridge<P, L>

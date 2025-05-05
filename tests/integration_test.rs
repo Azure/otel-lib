@@ -9,11 +9,11 @@ use std::fs::OpenOptions;
 use std::path::PathBuf;
 use std::time::{Duration, SystemTime};
 
-use filetime::{set_file_mtime, FileTime};
+use filetime::{FileTime, set_file_mtime};
 use log::{debug, error, info, trace, warn};
 use mocks::{
-    clean_up_bearer_token, create_or_update_bearer_token, generate_self_signed_cert,
-    get_test_bearer_token, MockServer,
+    MockServer, clean_up_bearer_token, create_or_update_bearer_token, generate_self_signed_cert,
+    get_test_bearer_token,
 };
 use opentelemetry::{global, logs::Severity, metrics::MeterProvider};
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
@@ -23,8 +23,8 @@ use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue};
 use opentelemetry_proto::tonic::metrics::v1::AggregationTemporality;
 use opentelemetry_sdk::metrics::data::Temporality;
 use otel_lib::{
-    config::{Attribute, Config, LogsExportTarget, MetricsExportTarget, Prometheus},
     Otel,
+    config::{Attribute, Config, LogsExportTarget, MetricsExportTarget, Prometheus},
 };
 use port_check::free_local_port_in_range;
 use tokio::sync::mpsc::Receiver;
@@ -408,9 +408,11 @@ async fn validate_filtered_logs(
     assert_eq!(log_messages.pop().unwrap(), Value::StringValue(error_log));
 
     // check that no more messages are received.
-    assert!(timeout(Duration::from_secs(2), filtered_logs_rx.recv())
-        .await
-        .is_err());
+    assert!(
+        timeout(Duration::from_secs(2), filtered_logs_rx.recv())
+            .await
+            .is_err()
+    );
 }
 
 async fn validate_unfiltered_logs(
@@ -439,7 +441,9 @@ async fn validate_unfiltered_logs(
     assert_eq!(log_messages.pop().unwrap(), Value::StringValue(warn_log));
 
     // check that no more messages are received.
-    assert!(timeout(Duration::from_secs(2), logs_rx.recv())
-        .await
-        .is_err());
+    assert!(
+        timeout(Duration::from_secs(2), logs_rx.recv())
+            .await
+            .is_err()
+    );
 }

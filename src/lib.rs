@@ -11,21 +11,22 @@ use hyper_util::rt::TokioIo;
 use log::{debug, error, info, warn};
 
 use notify::{RecommendedWatcher, RecursiveMode};
-use notify_debouncer_mini::{new_debouncer, DebouncedEvent, Debouncer};
+use notify_debouncer_mini::{DebouncedEvent, Debouncer, new_debouncer};
 use openssl::ssl::{SslConnector, SslConnectorBuilder, SslMethod};
-use opentelemetry::{global, KeyValue};
+use opentelemetry::{KeyValue, global};
 
-use axum::{http, Extension};
+use axum::{Extension, http};
 
 use opentelemetry_otlp::{ExportConfig, Protocol, TonicExporterBuilder, WithExportConfig};
 use opentelemetry_sdk::{
+    Resource,
     logs::LoggerProvider,
     metrics::{
+        InstrumentKind, PeriodicReader, SdkMeterProvider,
         data::Temporality,
         reader::{DefaultAggregationSelector, DefaultTemporalitySelector, TemporalitySelector},
-        InstrumentKind, PeriodicReader, SdkMeterProvider,
     },
-    runtime, Resource,
+    runtime,
 };
 
 // TODO: evaluate if we should keep supporting writing metrics to stdout.
@@ -34,7 +35,7 @@ use opentelemetry_stdout::MetricsExporterBuilder;
 use prometheus::{Encoder, Registry, TextEncoder};
 use tokio::{net::TcpStream, sync::mpsc};
 use tokio_openssl::SslStream;
-use tonic::{metadata::AsciiMetadataValue, service::Interceptor, Status};
+use tonic::{Status, metadata::AsciiMetadataValue, service::Interceptor};
 use url::Url;
 
 use self::config::Config;
@@ -66,7 +67,10 @@ impl Otel {
         let logger_provider = match loggers::init_logs(config.clone()) {
             Ok(logger_provider) => Some(logger_provider),
             Err(e) => {
-                warn!("unable to initialize otel logger as another library has already initialized a global logger:{:?}",e);
+                warn!(
+                    "unable to initialize otel logger as another library has already initialized a global logger:{:?}",
+                    e
+                );
                 None
             }
         };
