@@ -37,7 +37,7 @@ serde_json = { version = "1.0", default-features = false, features = [
 	"alloc",
 ] }
 thiserror = "1.0"
-tokio = "1.40"
+tokio = "1.43"
 tokio-openssl = "0.6"
 tonic = { version = "0.12" }
 tower = {version = "0.5", features = ["util"]}
@@ -52,7 +52,7 @@ port_check="0.2"
 prost = "0.13"
 reqwest = { version = "0.12", default-features = false }
 tonic = { version = "0.12", features = ["codegen", "prost"] }
-tokio = { version= "1.3", features = ["parking_lot"] }
+tokio = { version= "1.43", features = ["parking_lot"] }
 tokio-stream = "0.1"
 uuid = { version = "1", features = ["v4"] }
 
