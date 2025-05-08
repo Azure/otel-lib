@@ -1,9 +1,13 @@
 [package]
 name = "otel-lib"
-version = "0.1.0"
+version = "0.1.1"
 authors = ["Azure Edge Devs"]
 license = "MIT"
 edition = "2021"
+description = "OpenTelemetry-based metrics and logging framework for Azure Edge components."
+repository = "https://github.com/Azure/otel-lib"
+readme = "README.md"
+publish = true
 
 
 [dependencies]
