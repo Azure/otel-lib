@@ -102,6 +102,12 @@ impl Otel {
         }
     }
 
+    /// Returns the meter provider for the otel component
+    /// Gives users flexibility to handle multiple meter providers
+    pub fn get_meter_provider(&self) -> SdkMeterProvider {
+        self.meter_provider.clone()
+    }
+
     /// Long running tasks for otel propagation.
     ///
     /// # Errors
