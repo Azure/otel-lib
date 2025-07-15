@@ -1,6 +1,6 @@
 # Observability Example App
 
-A simple app that shows how to use the otel-lib to
+A simple app that shows how to use the azure_iot_operations_otel to
 - create a bunch of metrics,
 - update them in a loop,
 - export them to an open telemetry compatible collector,

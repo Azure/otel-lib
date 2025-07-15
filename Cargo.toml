@@ -1,6 +1,6 @@
 [package]
-name = "otel-lib"
-version = "0.1.1"
+name = "azure_iot_operations_otel"
+version = "0.2.1"
 authors = ["Azure Edge Devs"]
 license = "MIT"
 edition = "2021"

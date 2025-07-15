@@ -12,7 +12,7 @@
 # "crate_name" = coverage_threshold
 #
 # - "crate_name" is the name of the crate with quotes and any subdirectory path
-#   (if applicable), e.g., "otel-lib".
+#   (if applicable), e.g., "azure_iot_operations_otel".
 # - coverage_threshold is a numeric value (integer or decimal) without quotes,
 #   representing the minimum coverage percentage.
 #

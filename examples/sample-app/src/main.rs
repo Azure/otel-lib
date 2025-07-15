@@ -5,7 +5,7 @@ use clap::{arg, command, Parser};
 use log::{error, info};
 use opentelemetry::logs::Severity;
 use opentelemetry_sdk::metrics::data::Temporality;
-use otel_lib::{
+use azure_iot_operations_otel::{
     config::{Attribute, Config, LogsExportTarget, MetricsExportTarget, Prometheus},
     Otel,
 };

@@ -1,0 +1,5 @@
+[registries]
+preview = { index = "sparse+https://pkgs.dev.azure.com/azure-iot-sdks/iot-operations/_packaging/preview~force-auth/Cargo/index/" }
+
+[registry.preview]
+credential-provider = "cargo:token"

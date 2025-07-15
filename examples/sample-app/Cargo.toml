@@ -10,7 +10,7 @@ edition = "2021"
 [dependencies]
 clap = { version = "4.5", features=["derive"] }
 log = { version = "0.4", default-features = false }
-otel-lib = { path = "../.." }
+azure_iot_operations_otel = { path = "../.." }
 once_cell = "1.19"
 opentelemetry = { version = "0.24", features = ["metrics", "logs"]}
 opentelemetry_sdk =  {version = "0.24", features = ["metrics", "logs", "rt-tokio", "logs_level_enabled"]}

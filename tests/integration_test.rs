@@ -22,7 +22,7 @@ use opentelemetry_proto::tonic::common::v1::any_value::Value::{self, StringValue
 use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue};
 use opentelemetry_proto::tonic::metrics::v1::AggregationTemporality;
 use opentelemetry_sdk::metrics::data::Temporality;
-use otel_lib::{
+use azure_iot_operations_otel::{
     config::{Attribute, Config, LogsExportTarget, MetricsExportTarget, Prometheus},
     Otel,
 };
@@ -37,7 +37,7 @@ mod mocks;
 
 // This test does the following
 // 1) setup four mock otlp servers, two for filtered logs (with TLS and without) and the other 2 for unfiltered logs
-// 2) configure the otel-lib to
+// 2) configure the azure_iot_operations_otel to
 //    a) log at the `warn` level
 //    b) export logs to the filtered server the `error` level.
 //    c) export all logs to the unfiltered servers
@@ -92,7 +92,7 @@ async fn end_to_end_test() {
         unfiltered_target_with_tls.server.run().await;
     });
 
-    // Setup Otel-lib
+    // Setup azure_iot_operations_otel
     let prom_port = free_local_port_in_range(10400..=10500).unwrap();
     let prometheus_config = Some(Prometheus { port: prom_port });
 
@@ -275,11 +275,11 @@ async fn run_tests(
     let warn_log = "this is a test warn message";
     let error_log = "this is a test error message";
 
-    trace!("{trace_log}"); // shouldn't be logged by otel-lib
-    debug!("{debug_log}"); // shouldn't be logged by otel-lib
-    info!("{info_log}"); // shouldn't be logged by otel-lib
-    warn!("{warn_log}"); // should be logged by otel-lib and exported to the unfiltered target
-    error!("{error_log}"); // should be logged by otel-lib and exported to both OTLP targets
+    trace!("{trace_log}"); // shouldn't be logged by azure_iot_operations_otel
+    debug!("{debug_log}"); // shouldn't be logged by azure_iot_operations_otel
+    info!("{info_log}"); // shouldn't be logged by azure_iot_operations_otel
+    warn!("{warn_log}"); // should be logged by azure_iot_operations_otel and exported to the unfiltered target
+    error!("{error_log}"); // should be logged by azure_iot_operations_otel and exported to both OTLP targets
 
     // Check that the filtered target only receives the error log
     validate_filtered_logs(filtered_logs_rx, error_log.to_owned()).await;
