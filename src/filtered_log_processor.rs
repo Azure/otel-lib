@@ -16,7 +16,7 @@ use futures_util::{
 
 use opentelemetry::{
     global,
-    logs::{LogError, LogResult, Severity},
+    logs::{AnyValue, LogError, LogResult, Severity},
 };
 use opentelemetry_sdk::{
     export::logs::{ExportResult, LogData, LogExporter},
@@ -125,13 +125,34 @@ impl<R: RuntimeChannel> FilteredBatchLogProcessor<R> {
             while let Some(message) = messages.next().await {
                 match message {
                     BatchMessage::ExportLog(log) => {
-                        // add log only if the severity is >= export_severity
-                        if let Some(severity) = log.record.severity_number {
-                            if severity >= config.export_severity {
-                                logs.push(Cow::Owned(log));
-                            } else {
-                                continue;
-                            }
+                        // apply both severity and target filtering
+                        let severity_matches = if let Some(severity) = log.record.severity_number {
+                            severity >= config.export_severity
+                        } else {
+                            false
+                        };
+
+                        let target_matches = if let Some(ref target_filter) = config.target_filter {
+                            // Check if the log has a "target" attribute that matches our filter
+                            log.record.attributes.as_ref().map_or(false, |attrs| {
+                                attrs.iter().any(|(key, value)| {
+                                    if key.as_str() == "target" {
+                                        // Extract string value from AnyValue by matching on the enum
+                                        match value {
+                                            AnyValue::String(target_value) => target_value.as_str() == target_filter,
+                                            _ => false,
+                                        }
+                                    } else {
+                                        false
+                                    }
+                                })
+                            })
+                        } else {
+                            true // if no target filter specified, accept all logs
+                        };
+
+                        if severity_matches && target_matches {
+                            logs.push(Cow::Owned(log));
                         } else {
                             continue;
                         }
@@ -240,7 +261,7 @@ where
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub(crate) struct FilteredBatchConfig {
     /// The maximum queue size to buffer logs for delayed processing. If the
     /// queue gets full it drops the logs. The default value of is 2048.
@@ -261,6 +282,9 @@ pub(crate) struct FilteredBatchConfig {
 
     /// export level - levels >= which to export
     pub export_severity: Severity,
+
+    /// target filter - only export logs from this target. If None, exports all logs.
+    pub target_filter: Option<String>,
 }
 
 impl Default for FilteredBatchConfig {
@@ -271,6 +295,7 @@ impl Default for FilteredBatchConfig {
             max_export_batch_size: OTEL_BLRP_MAX_EXPORT_BATCH_SIZE_DEFAULT,
             max_export_timeout: Duration::from_millis(OTEL_BLRP_EXPORT_TIMEOUT_DEFAULT),
             export_severity: Severity::Error,
+            target_filter: None,
         }
     }
 }

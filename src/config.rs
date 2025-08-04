@@ -88,10 +88,26 @@ pub struct LogsExportTarget {
     pub timeout: u64,
     /// export severity - severity >= which to export
     pub export_severity: Option<Severity>,
+    /// target name filter - only export logs that match this target name. If None, exports all logs.
+    pub target_filter: Option<String>,
     /// path to root ca cert
     pub ca_cert_path: Option<String>,
     /// a fn that provides the bearer token, which will be called to get the token for each export request
     pub bearer_token_provider_fn: Option<fn() -> String>,
+}
+
+impl Default for LogsExportTarget {
+    fn default() -> Self {
+        Self {
+            url: String::new(),
+            interval_secs: 30,
+            timeout: 5,
+            export_severity: None,
+            target_filter: None,
+            ca_cert_path: None,
+            bearer_token_provider_fn: None,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -147,8 +163,8 @@ mod tests {
             interval_secs: 1,
             timeout: 5,
             export_severity: Some(Severity::Error),
-            ca_cert_path: None,
             bearer_token_provider_fn: Some(get_dummy_auth_token),
+            ..Default::default()
         }];
 
         let config = Config {

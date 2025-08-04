@@ -137,8 +137,8 @@ async fn end_to_end_test() {
             interval_secs: 1,
             timeout: 5,
             export_severity: Some(Severity::Error),
-            ca_cert_path: None,
             bearer_token_provider_fn: Some(get_test_bearer_token),
+            ..Default::default()
         },
         LogsExportTarget {
             url: filtered_target_with_tls.endpoint.clone(),
@@ -147,14 +147,14 @@ async fn end_to_end_test() {
             export_severity: Some(Severity::Error),
             ca_cert_path: Some(self_signed_cert.get_ca_cert_path()),
             bearer_token_provider_fn: Some(get_test_bearer_token),
+            ..Default::default()
         },
         LogsExportTarget {
             url: unfiltered_target.endpoint,
             interval_secs: 1,
             timeout: 5,
             export_severity: None,
-            ca_cert_path: None,
-            bearer_token_provider_fn: None,
+            ..Default::default()
         },
         LogsExportTarget {
             url: unfiltered_target_with_tls.endpoint,
@@ -162,7 +162,7 @@ async fn end_to_end_test() {
             timeout: 5,
             export_severity: None,
             ca_cert_path: Some(self_signed_cert.get_ca_cert_path()),
-            bearer_token_provider_fn: None,
+            ..Default::default()
         },
     ];
 
