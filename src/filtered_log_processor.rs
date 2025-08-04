@@ -134,12 +134,14 @@ impl<R: RuntimeChannel> FilteredBatchLogProcessor<R> {
 
                         let target_matches = if let Some(ref target_filter) = config.target_filter {
                             // Check if the log has a "target" attribute that matches our filter
-                            log.record.attributes.as_ref().map_or(false, |attrs| {
+                            log.record.attributes.as_ref().is_some_and(|attrs| {
                                 attrs.iter().any(|(key, value)| {
                                     if key.as_str() == "target" {
                                         // Extract string value from AnyValue by matching on the enum
                                         match value {
-                                            AnyValue::String(target_value) => target_value.as_str() == target_filter,
+                                            AnyValue::String(target_value) => {
+                                                target_value.as_str() == target_filter
+                                            }
                                             _ => false,
                                         }
                                     } else {

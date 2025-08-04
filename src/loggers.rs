@@ -63,7 +63,7 @@ where
         log_record.set_severity_number(to_otel_severity(record.level()));
         log_record.set_severity_text(record.level().as_str().into());
         log_record.set_timestamp(timestamp);
-        
+
         // Add target as an attribute so it can be filtered
         log_record.add_attribute("target", AnyValue::from(record.target().to_string()));
 
