@@ -269,6 +269,7 @@ impl OtlpServer {
     }
 
     #[allow(clippy::unnecessary_wraps)]
+    #[allow(clippy::result_large_err)]
     fn auth_interceptor(request: Request<()>) -> Result<Request<()>, Status> {
         let header_value = request
             .metadata()

@@ -64,6 +64,9 @@ where
         log_record.set_severity_text(record.level().as_str().into());
         log_record.set_timestamp(timestamp);
 
+        // Add target as an attribute so it can be filtered
+        log_record.add_attribute("target", AnyValue::from(record.target().to_string()));
+
         self.logger.emit(log_record);
     }
 
@@ -163,6 +166,7 @@ pub(crate) fn init_logs(config: Config) -> Result<LoggerProvider, log::SetLogger
             if let Some(export_severity) = export_target.export_severity {
                 let filtered_batch_config = FilteredBatchConfig {
                     export_severity,
+                    target_filters: export_target.target_filters.clone(),
                     scheduled_delay: Duration::from_secs(export_target.interval_secs),
                     max_export_timeout: Duration::from_secs(export_target.timeout),
                     ..Default::default()
