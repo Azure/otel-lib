@@ -88,7 +88,7 @@ async fn main() {
                 STATIC_METRICS.updown_counter.add(val * -1.0, &[]);
             }
             STATIC_METRICS.observable_gauge.observe(iteration, &[]);
-            info!("iteration: {iteration}");
+            info!("iteration: {}", iteration);
             sleep(Duration::from_micros(100)).await;
         }
         info!("Done. Please hit [Ctrl+C] to exit");

@@ -88,8 +88,7 @@ pub struct LogsExportTarget {
     pub timeout: u64,
     /// export severity - severity >= which to export
     pub export_severity: Option<Severity>,
-    /// target name filters - only export logs that match any of these target patterns. If None, exports all logs.
-    /// Supports exact matches and prefix patterns (ending with '::')
+    /// target name filters - only export logs that match these exact target names. If None, exports all logs.
     pub target_filters: Option<Vec<String>>,
     /// path to root ca cert
     pub ca_cert_path: Option<String>,
