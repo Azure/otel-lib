@@ -125,12 +125,16 @@ impl<R: RuntimeChannel> FilteredBatchLogProcessor<R> {
             while let Some(message) = messages.next().await {
                 match message {
                     BatchMessage::ExportLog(log) => {
-                        // apply both severity and target filtering
+                        // apply severity and target filtering
                         let severity_matches = if let Some(severity) = log.record.severity_number {
                             severity >= config.export_severity
                         } else {
                             false
                         };
+
+                        if !severity_matches {
+                            continue; // skip logs that do not match the severity filter
+                        }
 
                         let target_matches = if let Some(ref target_filter) = config.target_filter {
                             // Check if the log has a "target" attribute that matches our filter
@@ -153,11 +157,11 @@ impl<R: RuntimeChannel> FilteredBatchLogProcessor<R> {
                             true // if no target filter specified, accept all logs
                         };
 
-                        if severity_matches && target_matches {
-                            logs.push(Cow::Owned(log));
-                        } else {
-                            continue;
+                        if !target_matches {
+                            continue; // skip logs that do not match the target filter
                         }
+
+                        logs.push(Cow::Owned(log));
 
                         if logs.len() == config.max_export_batch_size {
                             let result = export_with_timeout(
