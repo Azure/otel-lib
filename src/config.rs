@@ -88,8 +88,9 @@ pub struct LogsExportTarget {
     pub timeout: u64,
     /// export severity - severity >= which to export
     pub export_severity: Option<Severity>,
-    /// target name filter - only export logs that match this target name. If None, exports all logs.
-    pub target_filter: Option<String>,
+    /// target name filters - only export logs that match any of these target patterns. If None, exports all logs.
+    /// Supports exact matches and prefix patterns (ending with '::')
+    pub target_filters: Option<Vec<String>>,
     /// path to root ca cert
     pub ca_cert_path: Option<String>,
     /// a fn that provides the bearer token, which will be called to get the token for each export request
@@ -103,7 +104,7 @@ impl Default for LogsExportTarget {
             interval_secs: 30,
             timeout: 5,
             export_severity: None,
-            target_filter: None,
+            target_filters: None,
             ca_cert_path: None,
             bearer_token_provider_fn: None,
         }

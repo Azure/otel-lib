@@ -166,7 +166,7 @@ pub(crate) fn init_logs(config: Config) -> Result<LoggerProvider, log::SetLogger
             if let Some(export_severity) = export_target.export_severity {
                 let filtered_batch_config = FilteredBatchConfig {
                     export_severity,
-                    target_filter: export_target.target_filter.clone(),
+                    target_filters: export_target.target_filters.clone(),
                     scheduled_delay: Duration::from_secs(export_target.interval_secs),
                     max_export_timeout: Duration::from_secs(export_target.timeout),
                     ..Default::default()

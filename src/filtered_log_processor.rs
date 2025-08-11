@@ -126,27 +126,28 @@ impl<R: RuntimeChannel> FilteredBatchLogProcessor<R> {
                 match message {
                     BatchMessage::ExportLog(log) => {
                         // apply severity and target filtering
-                        let severity_matches = if let Some(severity) = log.record.severity_number {
-                            severity >= config.export_severity
-                        } else {
-                            false
-                        };
+                        let severity_matches = log
+                            .record
+                            .severity_number
+                            .map_or(false, |sev| sev >= config.export_severity);
 
                         if !severity_matches {
                             continue; // skip logs that do not match the severity filter
                         }
 
-                        let target_matches = if let Some(ref target_filter) = config.target_filter {
-                            // Check if the log has a "target" attribute that matches our filter
+                        let target_matches = if let Some(ref target_filters) = config.target_filters
+                        {
+                            // Check if the log has a "target" attribute that matches any of our filters
                             log.record.attributes.as_ref().is_some_and(|attrs| {
                                 attrs.iter().any(|(key, value)| {
                                     if key.as_str() == "target" {
                                         // Extract string value from AnyValue by matching on the enum
-                                        match value {
-                                            AnyValue::String(target_value) => {
-                                                target_value.as_str() == target_filter
-                                            }
-                                            _ => false,
+                                        if let AnyValue::String(target_value) = value {
+                                            let target_str = target_value.as_str();
+                                            // Check if target matches any of the configured filters
+                                            target_filters.iter().any(|filter| target_str == filter)
+                                        } else {
+                                            false
                                         }
                                     } else {
                                         false
@@ -154,7 +155,7 @@ impl<R: RuntimeChannel> FilteredBatchLogProcessor<R> {
                                 })
                             })
                         } else {
-                            true // if no target filter specified, accept all logs
+                            true // if no target filters specified, accept all logs
                         };
 
                         if !target_matches {
@@ -289,8 +290,8 @@ pub(crate) struct FilteredBatchConfig {
     /// export level - levels >= which to export
     pub export_severity: Severity,
 
-    /// target filter - only export logs from this target. If None, exports all logs.
-    pub target_filter: Option<String>,
+    /// target filters - only export logs from targets matching these strings. If None, exports all logs.
+    pub target_filters: Option<Vec<String>>,
 }
 
 impl Default for FilteredBatchConfig {
@@ -301,7 +302,7 @@ impl Default for FilteredBatchConfig {
             max_export_batch_size: OTEL_BLRP_MAX_EXPORT_BATCH_SIZE_DEFAULT,
             max_export_timeout: Duration::from_millis(OTEL_BLRP_EXPORT_TIMEOUT_DEFAULT),
             export_severity: Severity::Error,
-            target_filter: None,
+            target_filters: None,
         }
     }
 }
