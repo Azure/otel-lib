@@ -56,6 +56,7 @@ pub struct Otel {
     meter_provider: SdkMeterProvider,
     logger_provider: Option<LoggerProvider>,
     ca_cert_paths: HashSet<String>,
+    shutdown_tx: mpsc::Sender<()>,
     shutdown_rx: mpsc::Receiver<()>,
 }
 
@@ -97,6 +98,7 @@ impl Otel {
             meter_provider,
             logger_provider,
             ca_cert_paths,
+            shutdown_tx,
             shutdown_rx,
         };
 
@@ -164,6 +166,10 @@ impl Otel {
         }
 
         Ok(())
+    }
+
+    pub async fn shutdown(&self) -> Result<(), mpsc::error::SendError<()>> {
+        self.shutdown_tx.send(()).await  // Just sends signal, run() handles the rest
     }
 }
 
@@ -504,5 +510,48 @@ impl Interceptor for AuthIntercepter {
             }
         }
         Ok(modified_request)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::time::Duration;
+    use tokio::time::timeout;
+
+    #[tokio::test]
+    async fn test_shutdown_approaches_both_work() {
+        // Test that both shutdown approaches trigger the same graceful shutdown behavior
+        {
+            // Arrange
+            let config = Config::default();
+            let (mut otel, shutdown_tx) = Otel::new(config);
+            
+            let run_task = tokio::spawn(async move {
+                otel.run().await
+            });
+            
+            tokio::time::sleep(Duration::from_millis(50)).await;
+            
+            // Act
+            shutdown_tx.send(()).await.expect("Should be able to send shutdown signal");
+            
+            // Assert
+            let result = timeout(Duration::from_secs(1), run_task).await;
+            assert!(result.is_ok(), "Run task should complete after direct shutdown");
+            assert!(result.unwrap().is_ok(), "Run task should exit cleanly");
+        }
+        
+        {
+            // Arrange
+            let config = Config::default(); 
+            let (otel, _shutdown_tx) = Otel::new(config);
+            
+            // Act
+            let shutdown_result = otel.shutdown().await;
+
+            // Assert
+            assert!(shutdown_result.is_ok(), "Convenience shutdown should work");
+        }
     }
 }
