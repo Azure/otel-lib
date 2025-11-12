@@ -66,16 +66,20 @@ pub struct ShutdownHandle {
 
 impl ShutdownHandle {
     /// Send a shutdown signal
+    /// # Errors
+    /// * `mpsc::error::SendError` - If the shutdown signal could not be sent
     pub async fn shutdown(&self) -> Result<(), mpsc::error::SendError<()>> {
         self.sender.send(()).await
     }
 
     /// Get a clone of the shutdown sender for use in other contexts
+    #[must_use]
     pub fn sender(&self) -> mpsc::Sender<()> {
         self.sender.clone()
     }
 
     /// Clone shutdown handle to share shutdown capability
+    #[must_use]
     pub fn clone_handle(&self) -> Self {
         Self {
             sender: self.sender.clone(),
@@ -197,6 +201,7 @@ impl Otel {
     }
 
     /// Get a shutdown handle that can be used to trigger shutdown from other contexts.
+    #[must_use]
     pub fn shutdown_handle(&self) -> ShutdownHandle {
         ShutdownHandle {
             sender: self.shutdown_tx.clone(),
