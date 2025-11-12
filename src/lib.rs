@@ -168,6 +168,10 @@ impl Otel {
         Ok(())
     }
 
+    /// Convenience function to trigger shutdown from the Otel struct directly.
+    ///
+    /// # Errors
+    /// * `mpsc::error::SendError` - If the shutdown signal could not be sent
     pub async fn shutdown(&self) -> Result<(), mpsc::error::SendError<()>> {
         self.shutdown_tx.send(()).await // Just sends signal, run() handles the rest
     }
