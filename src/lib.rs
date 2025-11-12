@@ -56,13 +56,12 @@ pub struct Otel {
     meter_provider: SdkMeterProvider,
     logger_provider: Option<LoggerProvider>,
     ca_cert_paths: HashSet<String>,
-    shutdown_tx: mpsc::Sender<()>,
     shutdown_rx: mpsc::Receiver<()>,
 }
 
 impl Otel {
     #[must_use]
-    pub fn new(config: Config) -> Otel {
+    pub fn new(config: Config) -> (Otel, mpsc::Sender<()>) {
         let logger_provider = match loggers::init_logs(config.clone()) {
             Ok(logger_provider) => Some(logger_provider),
             Err(e) => {
@@ -91,15 +90,17 @@ impl Otel {
         }
 
         let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
+        let shutdown_tx_clone = shutdown_tx.clone();
 
-        Otel {
+        let otel = Otel {
             registry,
             meter_provider,
             logger_provider,
             ca_cert_paths,
-            shutdown_tx,
             shutdown_rx,
-        }
+        };
+
+        (otel, shutdown_tx_clone)
     }
 
     /// Long running tasks for otel propagation.
@@ -144,28 +145,25 @@ impl Otel {
                 return Err(OtelError::PrometheusServerStopped)
             }
             _ = self.shutdown_rx.recv() => {
+                // Graceful shutdown that flushes any pending metrics and logs to the exporter.
                 info!("shutting down otel component");
+
+                if let Err(metrics_error) = self.meter_provider.force_flush() {
+                    warn!("ecountered error while flushing metrics: {metrics_error:?}");
+                }
+                if let Err(metrics_error) = self.meter_provider.shutdown() {
+                    warn!("ecountered error while shutting down meter provider: {metrics_error:?}");
+                }
+
+                if let Some(logger_provider) = self.logger_provider.clone() {
+                    logger_provider.force_flush();
+                    let _ = logger_provider.shutdown();
+                }
+
             }
         }
 
         Ok(())
-    }
-
-    /// Graceful shutdown that flushes any pending metrics and logs to the exporter.
-    pub async fn shutdown(&self) {
-        if let Err(metrics_error) = self.meter_provider.force_flush() {
-            warn!("ecountered error while flushing metrics: {metrics_error:?}");
-        }
-        if let Err(metrics_error) = self.meter_provider.shutdown() {
-            warn!("ecountered error while shutting down meter provider: {metrics_error:?}");
-        }
-
-        if let Some(logger_provider) = self.logger_provider.clone() {
-            logger_provider.force_flush();
-            let _ = logger_provider.shutdown();
-        }
-
-        let _ = self.shutdown_tx.send(()).await;
     }
 }
 

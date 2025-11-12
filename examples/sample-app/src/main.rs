@@ -41,6 +41,7 @@ async fn main() {
                 interval_secs: 1,
                 timeout: 5,
                 export_severity: Some(Severity::Error),
+                target_filters: None,
                 ca_cert_path: args.ca_cert_path,
                 bearer_token_provider_fn: Some(get_dummy_bearer_token),
             }];
@@ -64,7 +65,7 @@ async fn main() {
         ..Config::default()
     };
 
-    let mut otel_component = Otel::new(config);
+    let (mut otel_component, shutdown_tx) = Otel::new(config);
     // Start the otel running task
     let otel_long_running_task = otel_component.run();
     // initialize static metrics
@@ -95,7 +96,7 @@ async fn main() {
     });
 
     let _ = join!(instrumentation_task, otel_long_running_task);
-    otel_component.shutdown().await;
+    let _ = shutdown_tx.send(()).await;
 }
 
 #[derive(Parser, Debug)]
