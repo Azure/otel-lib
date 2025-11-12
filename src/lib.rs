@@ -169,7 +169,7 @@ impl Otel {
     }
 
     pub async fn shutdown(&self) -> Result<(), mpsc::error::SendError<()>> {
-        self.shutdown_tx.send(()).await  // Just sends signal, run() handles the rest
+        self.shutdown_tx.send(()).await // Just sends signal, run() handles the rest
     }
 }
 
@@ -526,27 +526,31 @@ mod tests {
             // Arrange
             let config = Config::default();
             let (mut otel, shutdown_tx) = Otel::new(config);
-            
-            let run_task = tokio::spawn(async move {
-                otel.run().await
-            });
-            
+
+            let run_task = tokio::spawn(async move { otel.run().await });
+
             tokio::time::sleep(Duration::from_millis(50)).await;
-            
+
             // Act
-            shutdown_tx.send(()).await.expect("Should be able to send shutdown signal");
-            
+            shutdown_tx
+                .send(())
+                .await
+                .expect("Should be able to send shutdown signal");
+
             // Assert
             let result = timeout(Duration::from_secs(1), run_task).await;
-            assert!(result.is_ok(), "Run task should complete after direct shutdown");
+            assert!(
+                result.is_ok(),
+                "Run task should complete after direct shutdown"
+            );
             assert!(result.unwrap().is_ok(), "Run task should exit cleanly");
         }
-        
+
         {
             // Arrange
-            let config = Config::default(); 
+            let config = Config::default();
             let (otel, _shutdown_tx) = Otel::new(config);
-            
+
             // Act
             let shutdown_result = otel.shutdown().await;
 
