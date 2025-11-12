@@ -60,9 +60,32 @@ pub struct Otel {
     shutdown_rx: mpsc::Receiver<()>,
 }
 
+pub struct ShutdownHandle {
+    sender: mpsc::Sender<()>,
+}
+
+impl ShutdownHandle {
+    /// Send a shutdown signal
+    pub async fn shutdown(&self) -> Result<(), mpsc::error::SendError<()>> {
+        self.sender.send(()).await
+    }
+
+    /// Get a clone of the shutdown sender for use in other contexts
+    pub fn sender(&self) -> mpsc::Sender<()> {
+        self.sender.clone()
+    }
+
+    /// Clone shutdown handle to share shutdown capability
+    pub fn clone_handle(&self) -> Self {
+        Self {
+            sender: self.sender.clone(),
+        }
+    }
+}
+
 impl Otel {
     #[must_use]
-    pub fn new(config: Config) -> (Otel, mpsc::Sender<()>) {
+    pub fn new(config: Config) -> Otel {
         let logger_provider = match loggers::init_logs(config.clone()) {
             Ok(logger_provider) => Some(logger_provider),
             Err(e) => {
@@ -91,18 +114,23 @@ impl Otel {
         }
 
         let (shutdown_tx, shutdown_rx) = mpsc::channel(1);
-        let shutdown_tx_clone = shutdown_tx.clone();
 
-        let otel = Otel {
+        Otel {
             registry,
             meter_provider,
             logger_provider,
             ca_cert_paths,
             shutdown_tx,
             shutdown_rx,
-        };
+        }
+    }
 
-        (otel, shutdown_tx_clone)
+    /// Alternative constructor that also returns a shutdown handle.
+    #[must_use]
+    pub fn with_shutdown_handle(config: Config) -> (Otel, ShutdownHandle) {
+        let otel = Self::new(config);
+        let handle = otel.shutdown_handle();
+        (otel, handle)
     }
 
     /// Long running tasks for otel propagation.
@@ -166,6 +194,13 @@ impl Otel {
         }
 
         Ok(())
+    }
+
+    /// Get a shutdown handle that can be used to trigger shutdown from other contexts.
+    pub fn shutdown_handle(&self) -> ShutdownHandle {
+        ShutdownHandle {
+            sender: self.shutdown_tx.clone(),
+        }
     }
 
     /// Convenience function to trigger shutdown from the Otel struct directly.
@@ -529,15 +564,15 @@ mod tests {
         {
             // Arrange
             let config = Config::default();
-            let (mut otel, shutdown_tx) = Otel::new(config);
+            let (mut otel, shutdown_handle) = Otel::with_shutdown_handle(config);
 
             let run_task = tokio::spawn(async move { otel.run().await });
 
             tokio::time::sleep(Duration::from_millis(50)).await;
 
             // Act
-            shutdown_tx
-                .send(())
+            shutdown_handle
+                .shutdown()
                 .await
                 .expect("Should be able to send shutdown signal");
 
@@ -553,13 +588,47 @@ mod tests {
         {
             // Arrange
             let config = Config::default();
-            let (otel, _shutdown_tx) = Otel::new(config);
+            let otel = Otel::new(config);
 
             // Act
             let shutdown_result = otel.shutdown().await;
 
             // Assert
             assert!(shutdown_result.is_ok(), "Convenience shutdown should work");
+        }
+    }
+
+    #[tokio::test]
+    async fn test_both_constructor_patterns() {
+        // Pattern 1: Simple constructor - returns only Otel instance
+        {
+            let otel = Otel::new(Config::default());
+
+            // Get shutdown handle after construction
+            let handle1 = otel.shutdown_handle();
+            let handle2 = otel.shutdown_handle(); // Can get multiple handles
+
+            // Both handles should work
+            let _sender1 = handle1.sender();
+            let _sender2 = handle2.sender();
+
+            // Direct shutdown also available
+            let _result = otel.shutdown().await;
+        }
+
+        // Pattern 2: Constructor with explicit handle - returns tuple
+        {
+            let (otel, initial_handle) = Otel::with_shutdown_handle(Config::default());
+
+            // Can use the initial handle
+            let _sender1 = initial_handle.sender();
+
+            // Can still get more handles from the instance
+            let additional_handle = otel.shutdown_handle();
+            let _sender2 = additional_handle.sender();
+
+            // All approaches available
+            let _result = otel.shutdown().await;
         }
     }
 }

@@ -183,7 +183,7 @@ async fn end_to_end_test() {
         ..Config::default()
     };
 
-    let (mut otel_component, _shutdown_tx) = Otel::new(config);
+    let mut otel_component = Otel::new(config);
     let otel_long_running_task = tokio::spawn(async move { otel_component.run().await });
     let run_tests_task = run_tests(
         filtered_target.metrics_rx,
