@@ -71,20 +71,6 @@ impl ShutdownHandle {
     pub async fn shutdown(&self) -> Result<(), mpsc::error::SendError<()>> {
         self.sender.send(()).await
     }
-
-    /// Get a clone of the shutdown sender for use in other contexts
-    #[must_use]
-    pub fn sender(&self) -> mpsc::Sender<()> {
-        self.sender.clone()
-    }
-
-    /// Clone shutdown handle to share shutdown capability
-    #[must_use]
-    pub fn clone_handle(&self) -> Self {
-        Self {
-            sender: self.sender.clone(),
-        }
-    }
 }
 
 impl Otel {
@@ -593,41 +579,6 @@ mod tests {
 
             // Assert
             assert!(shutdown_result.is_ok(), "Convenience shutdown should work");
-        }
-    }
-
-    #[tokio::test]
-    async fn test_both_constructor_patterns() {
-        // Pattern 1: Simple constructor - returns only Otel instance
-        {
-            let otel = Otel::new(Config::default());
-
-            // Get shutdown handle after construction
-            let handle1 = otel.shutdown_handle();
-            let handle2 = otel.shutdown_handle(); // Can get multiple handles
-
-            // Both handles should work
-            let _sender1 = handle1.sender();
-            let _sender2 = handle2.sender();
-
-            // Direct shutdown also available
-            let _result = otel.shutdown().await;
-        }
-
-        // Pattern 2: Constructor with explicit handle - returns tuple
-        {
-            let otel = Otel::new(Config::default());
-            let initial_handle = otel.shutdown_handle();
-
-            // Can use the initial handle
-            let _sender1 = initial_handle.sender();
-
-            // Can still get more handles from the instance
-            let additional_handle = otel.shutdown_handle();
-            let _sender2 = additional_handle.sender();
-
-            // All approaches available
-            let _result = otel.shutdown().await;
         }
     }
 }
