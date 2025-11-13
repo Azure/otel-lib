@@ -129,14 +129,6 @@ impl Otel {
         }
     }
 
-    /// Alternative constructor that also returns a shutdown handle.
-    #[must_use]
-    pub fn with_shutdown_handle(config: Config) -> (Otel, ShutdownHandle) {
-        let otel = Self::new(config);
-        let handle = otel.shutdown_handle();
-        (otel, handle)
-    }
-
     /// Long running tasks for otel propagation.
     ///
     /// # Errors
@@ -569,7 +561,8 @@ mod tests {
         {
             // Arrange
             let config = Config::default();
-            let (mut otel, shutdown_handle) = Otel::with_shutdown_handle(config);
+            let mut otel = Otel::new(config);
+            let shutdown_handle = otel.shutdown_handle();
 
             let run_task = tokio::spawn(async move { otel.run().await });
 
@@ -623,7 +616,8 @@ mod tests {
 
         // Pattern 2: Constructor with explicit handle - returns tuple
         {
-            let (otel, initial_handle) = Otel::with_shutdown_handle(Config::default());
+            let otel = Otel::new(Config::default());
+            let initial_handle = otel.shutdown_handle();
 
             // Can use the initial handle
             let _sender1 = initial_handle.sender();

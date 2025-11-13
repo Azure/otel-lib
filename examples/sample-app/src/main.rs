@@ -65,7 +65,8 @@ async fn main() {
         ..Config::default()
     };
 
-    let (mut otel_component, shutdown_handle) = Otel::with_shutdown_handle(config);
+    let mut otel_component = Otel::new(config);
+    let shutdown_handle = otel_component.shutdown_handle();
     // Start the otel running task
     let otel_long_running_task = otel_component.run();
     // initialize static metrics
