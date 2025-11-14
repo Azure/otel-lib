@@ -161,10 +161,10 @@ impl Otel {
                 info!("shutting down otel component");
 
                 if let Err(metrics_error) = self.meter_provider.force_flush() {
-                    warn!("ecountered error while flushing metrics: {metrics_error:?}");
+                    warn!("encountered error while flushing metrics: {metrics_error:?}");
                 }
                 if let Err(metrics_error) = self.meter_provider.shutdown() {
-                    warn!("ecountered error while shutting down meter provider: {metrics_error:?}");
+                    warn!("encountered error while shutting down meter provider: {metrics_error:?}");
                 }
 
                 if let Some(logger_provider) = self.logger_provider.clone() {
