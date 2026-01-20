@@ -307,6 +307,7 @@ fn init_metrics(config: Config) -> (Option<PrometheusRegistry>, SdkMeterProvider
 
             let reader = PeriodicReader::builder(exporter, runtime::Tokio)
                 .with_interval(Duration::from_secs(export_target.interval_secs))
+                .with_timeout(Duration::from_secs(export_target.timeout))
                 .build();
             meter_provider_builder = meter_provider_builder.with_reader(reader);
         }
@@ -322,7 +323,9 @@ fn init_metrics(config: Config) -> (Option<PrometheusRegistry>, SdkMeterProvider
             })
             .build();
 
-        let reader = PeriodicReader::builder(exporter, runtime::Tokio).build();
+        let reader = PeriodicReader::builder(exporter, runtime::Tokio)
+            .with_timeout(Duration::from_secs(30))
+            .build();
         meter_provider_builder = meter_provider_builder.with_reader(reader);
     }
 
