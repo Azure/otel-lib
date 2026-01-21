@@ -288,7 +288,7 @@ impl TemporalitySelector for DeltaTemporalitySelector {
 /// setup the stdout metrics writer if enabled, and initializes STATIC Metrics.
 ///
 /// Returns the Prometheus Registry or None if Prometheus was disabled.
-///
+#[allow(clippy::too_many_lines)]
 fn init_metrics(config: Config) -> (Option<PrometheusRegistry>, SdkMeterProvider) {
     let mut keys = vec![KeyValue::new(SERVICE_NAME_KEY, config.service_name.clone())];
     if let Some(resource_attributes) = config.resource_attributes {
