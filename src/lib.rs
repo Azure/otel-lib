@@ -162,7 +162,7 @@ impl Otel {
 
                 // Use a timeout for shutdown operations to prevent hanging
                 // when the server is unavailable.
-                let shutdown_timeout = Duration::from_secs(10);
+                let shutdown_timeout = Duration::from_secs(30);
 
                 let shutdown_result = tokio::time::timeout(
                     shutdown_timeout,
