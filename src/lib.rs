@@ -160,24 +160,9 @@ impl Otel {
                 // Graceful shutdown that flushes any pending metrics and logs to the exporter.
                 info!("shutting down otel component");
 
-                // Use a timeout for flush/shutdown operations to prevent hanging
-                // when the server is unavailable
+                // Use a timeout for shutdown operations to prevent hanging
+                // when the server is unavailable.
                 let shutdown_timeout = Duration::from_secs(10);
-
-                let flush_result = tokio::time::timeout(
-                    shutdown_timeout,
-                    tokio::task::spawn_blocking({
-                        let meter_provider = self.meter_provider.clone();
-                        move || meter_provider.force_flush()
-                    })
-                ).await;
-
-                match flush_result {
-                    Err(_) => warn!("meter provider force_flush timed out"),
-                    Ok(Err(e)) => warn!("meter provider force_flush task failed: {e:?}"),
-                    Ok(Ok(Err(e))) => warn!("encountered error while flushing metrics: {e:?}"),
-                    Ok(Ok(Ok(()))) => debug!("meter provider force_flush completed"),
-                }
 
                 let shutdown_result = tokio::time::timeout(
                     shutdown_timeout,
@@ -190,30 +175,25 @@ impl Otel {
                 match shutdown_result {
                     Err(_) => warn!("meter provider shutdown timed out"),
                     Ok(Err(e)) => warn!("meter provider shutdown task failed: {e:?}"),
-                    Ok(Ok(Err(e))) => warn!("encountered error while shutting down meter provider: {e:?}"),
+                    Ok(Ok(Err(e))) => {
+                        debug!("meter provider shutdown completed with error (often expected during shutdown): {e:?}");
+                    }
                     Ok(Ok(Ok(()))) => debug!("meter provider shutdown completed"),
                 }
 
-                if let Some(logger_provider) = self.logger_provider.clone() {
-                    let flush_result = tokio::time::timeout(
-                        shutdown_timeout,
-                        tokio::task::spawn_blocking({
-                            let lp = logger_provider.clone();
-                            move || lp.force_flush()
-                        })
-                    ).await;
-
-                    if let Err(_) | Ok(Err(_)) = flush_result {
-                        warn!("logger provider force_flush timed out or failed");
-                    }
-
+                if let Some(logger_provider) = self.logger_provider.take() {
                     let shutdown_result = tokio::time::timeout(
                         shutdown_timeout,
                         tokio::task::spawn_blocking(move || logger_provider.shutdown())
                     ).await;
 
-                    if let Err(_) | Ok(Err(_)) = shutdown_result {
-                        warn!("logger provider shutdown timed out or failed");
+                    match shutdown_result {
+                        Err(_) => warn!("logger provider shutdown timed out"),
+                        Ok(Err(e)) => warn!("logger provider shutdown task failed: {e:?}"),
+                        Ok(Ok(Err(e))) => {
+                            debug!("logger provider shutdown completed with error (often expected during shutdown): {e:?}");
+                        }
+                        Ok(Ok(Ok(()))) => debug!("logger provider shutdown completed"),
                     }
                 }
 
