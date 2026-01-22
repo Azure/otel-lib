@@ -45,6 +45,7 @@ pub mod loggers;
 pub mod syslog_writer;
 
 pub(crate) const SERVICE_NAME_KEY: &str = "service.name";
+pub const OTEL_SHUTDOWN_TIMEOUT_SECS: u64 = 30;
 
 struct PrometheusRegistry {
     registry: Registry,
@@ -162,7 +163,7 @@ impl Otel {
 
                 // Use a timeout for shutdown operations to prevent hanging
                 // when the server is unavailable.
-                let shutdown_timeout = Duration::from_secs(30);
+                let shutdown_timeout = Duration::from_secs(OTEL_SHUTDOWN_TIMEOUT_SECS);
 
                 let shutdown_result = tokio::time::timeout(
                     shutdown_timeout,
