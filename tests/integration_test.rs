@@ -15,13 +15,13 @@ use mocks::{
     clean_up_bearer_token, create_or_update_bearer_token, generate_self_signed_cert,
     get_test_bearer_token, MockServer,
 };
-use opentelemetry::{global, logs::Severity, metrics::MeterProvider};
+use opentelemetry::{global, logs::Severity};
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::common::v1::any_value::Value::{self, StringValue};
 use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue};
 use opentelemetry_proto::tonic::metrics::v1::AggregationTemporality;
-use opentelemetry_sdk::metrics::data::Temporality;
+use otel_lib::config::Temporality;
 use otel_lib::{
     config::{Attribute, Config, LogsExportTarget, MetricsExportTarget, Prometheus},
     Otel,
@@ -233,7 +233,7 @@ async fn run_tests(
 ) {
     create_or_update_bearer_token();
     let meter = global::meter_provider().meter("end_to_end_test");
-    let test_counter = meter.u64_counter("test_counter").init();
+    let test_counter = meter.u64_counter("test_counter").build();
     test_counter.add(1, &[]);
 
     // validate that the metric is exported to the OTLP targets
@@ -374,6 +374,7 @@ async fn validate_test_counter(
         value: Some(AnyValue {
             value: Some(StringValue(sample_attribute.value.clone())),
         }),
+        ..Default::default()
     };
     //validate resource attribute
     assert!(get_resource_attributes(&metrics_export_request).contains(&kv));

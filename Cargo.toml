@@ -1,6 +1,6 @@
 [package]
 name = "otel-lib"
-version = "0.1.1"
+version = "0.2.0"
 authors = ["Azure Edge Devs"]
 license = "MIT"
 edition = "2021"
@@ -20,19 +20,16 @@ futures-util = "0.3"
 humantime = "2.1"
 hyper = { version = "0.14", features = ["http1", "server"] }
 hyper-util = "0.1"
+hostname = "0.4"
 log = { version = "0.4", default-features = false }
 notify = "6"
 notify-debouncer-mini = "0.4"
-nix = { version = "0.27", default-features = false, features = [
-	"process", "hostname",
-] }
 openssl = "0.10"
-opentelemetry = { version = "0.24", features = ["metrics", "logs"]}
-opentelemetry-otlp = { version ="0.17", features = ["grpc-tonic","metrics", "logs"]}
-opentelemetry-prometheus = {version = "0.17" }
-opentelemetry_sdk =  {version = "0.24", features = ["metrics", "logs", "rt-tokio", "testing", "logs_level_enabled"]}
-opentelemetry-stdout =  {version = "0.5", features = ["metrics"]}
-prometheus = "0.13"
+opentelemetry = { version = "0.32", features = ["metrics", "logs"]}
+opentelemetry-otlp = { version ="0.32", features = ["grpc-tonic","metrics", "logs"]}
+opentelemetry-prometheus = {version = "0.32" }
+opentelemetry_sdk =  {version = "0.32.1", features = ["metrics", "logs", "rt-tokio", "testing"]}
+prometheus = { version = "0.14", default-features = false }
 serde = { version = "1", features = [
 	"derive",
 	"rc",
@@ -43,7 +40,7 @@ serde_json = { version = "1.0", default-features = false, features = [
 thiserror = "1.0"
 tokio = "1.40"
 tokio-openssl = "0.6"
-tonic = { version = "0.12" }
+tonic = { version = "0.14" }
 tower = {version = "0.5", features = ["util"]}
 url = "2"
 
@@ -51,12 +48,11 @@ url = "2"
 async-stream = "0.3"
 async-trait = "0.1"
 filetime = "0.2"
-opentelemetry-proto = { version = "0.7", features = ["gen-tonic", "metrics", "logs"] }
+opentelemetry-proto = { version = "0.32", features = ["gen-tonic", "metrics", "logs"] }
 port_check="0.2"
-prost = "0.13"
 reqwest = { version = "0.12", default-features = false }
-tonic = { version = "0.12", features = ["codegen", "prost"] }
-tokio = { version= "1.3", features = ["parking_lot"] }
+tonic = { version = "0.14" }
+tokio = { version= "1", features = ["parking_lot"] }
 tokio-stream = "0.1"
 uuid = { version = "1", features = ["v4"] }
 

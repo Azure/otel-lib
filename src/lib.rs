@@ -17,30 +17,24 @@ use opentelemetry::{global, KeyValue};
 
 use axum::{http, Extension};
 
-use opentelemetry_otlp::{ExportConfig, Protocol, TonicExporterBuilder, WithExportConfig};
+use opentelemetry_otlp::{Protocol, WithExportConfig, WithTonicConfig};
 use opentelemetry_sdk::{
-    logs::LoggerProvider,
-    metrics::{
-        data::Temporality,
-        reader::{DefaultAggregationSelector, DefaultTemporalitySelector, TemporalitySelector},
-        InstrumentKind, PeriodicReader, SdkMeterProvider,
-    },
-    runtime, Resource,
+    logs::SdkLoggerProvider,
+    metrics::{PeriodicReader, SdkMeterProvider, Temporality},
+    Resource,
 };
-
-// TODO: evaluate if we should keep supporting writing metrics to stdout.
-use opentelemetry_stdout::MetricsExporterBuilder;
 
 use prometheus::{Encoder, Registry, TextEncoder};
 use tokio::{net::TcpStream, sync::mpsc};
 use tokio_openssl::SslStream;
-use tonic::{metadata::AsciiMetadataValue, service::Interceptor, Status};
+use tonic::{metadata::AsciiMetadataValue, Status};
 use url::Url;
 
 use self::config::Config;
 
 pub mod config;
 mod filtered_log_processor;
+mod json_metric_exporter;
 pub mod loggers;
 pub mod syslog_writer;
 
@@ -55,7 +49,7 @@ struct PrometheusRegistry {
 pub struct Otel {
     registry: Option<PrometheusRegistry>,
     meter_provider: SdkMeterProvider,
-    logger_provider: Option<LoggerProvider>,
+    logger_provider: Option<SdkLoggerProvider>,
     ca_cert_paths: HashSet<String>,
     shutdown_tx: mpsc::Sender<()>,
     shutdown_rx: mpsc::Receiver<()>,
@@ -247,23 +241,6 @@ fn create_watcher() -> Result<
     Ok((watcher, async_rx))
 }
 
-#[derive(Default, Debug)]
-/// A temporality selector that returns Delta for all instruments
-pub(crate) struct DeltaTemporalitySelector {}
-
-impl DeltaTemporalitySelector {
-    /// Create a new default temporality selector
-    fn new() -> Self {
-        Self::default()
-    }
-}
-
-impl TemporalitySelector for DeltaTemporalitySelector {
-    fn temporality(&self, _kind: InstrumentKind) -> Temporality {
-        Temporality::Delta
-    }
-}
-
 /// Initialize metrics based on passed in config.
 /// This function will setup metrics exporters, create a Prometheus registry if enabled,
 /// setup the stdout metrics writer if enabled, and initializes STATIC Metrics.
@@ -277,7 +254,8 @@ fn init_metrics(config: Config) -> (Option<PrometheusRegistry>, SdkMeterProvider
             keys.push(KeyValue::new(attribute.key, attribute.value));
         }
     }
-    let mut meter_provider_builder = SdkMeterProvider::builder().with_resource(Resource::new(keys));
+    let resource = Resource::builder_empty().with_attributes(keys).build();
+    let mut meter_provider_builder = SdkMeterProvider::builder().with_resource(resource);
 
     // Setup Prometheus Registry if configured
     let prometheus_registry = if let Some(prometheus_config) = config.prometheus_config {
@@ -305,28 +283,10 @@ fn init_metrics(config: Config) -> (Option<PrometheusRegistry>, SdkMeterProvider
     // Add Metrics Exporters
     if let Some(export_targets_list) = config.metrics_export_targets {
         for export_target in export_targets_list {
-            let export_config = ExportConfig {
-                endpoint: export_target.url.clone(),
-                timeout: Duration::from_secs(export_target.timeout),
-                protocol: Protocol::Grpc,
-            };
-
-            let temporality_selector: Box<dyn TemporalitySelector> =
-                if let Some(temporality) = export_target.temporality {
-                    match temporality {
-                        Temporality::Delta => Box::new(DeltaTemporalitySelector::new()),
-                        _ => Box::new(DefaultTemporalitySelector::new()),
-                    }
-                } else {
-                    Box::new(DefaultTemporalitySelector::new())
-                };
-
-            let mut exporter_builder = opentelemetry_otlp::new_exporter().tonic();
+            let mut exporter_builder = opentelemetry_otlp::MetricExporter::builder().with_tonic();
             if let Some(bearer_token_provider_fn) = export_target.bearer_token_provider_fn {
-                let auth_interceptor = AuthIntercepter {
-                    bearer_token_provider_fn,
-                };
-                exporter_builder = exporter_builder.with_interceptor(auth_interceptor);
+                exporter_builder =
+                    exporter_builder.with_interceptor(auth_interceptor(bearer_token_provider_fn));
             }
             exporter_builder = match handle_tls(
                 exporter_builder,
@@ -341,12 +301,12 @@ fn init_metrics(config: Config) -> (Option<PrometheusRegistry>, SdkMeterProvider
             };
 
             let exporter = match exporter_builder
-                .with_export_config(export_config)
-                .build_metrics_exporter(
-                    // TODO: Make this also part of config?
-                    Box::new(DefaultAggregationSelector::new()),
-                    temporality_selector,
-                ) {
+                .with_endpoint(export_target.url.clone())
+                .with_timeout(Duration::from_secs(export_target.timeout))
+                .with_protocol(Protocol::Grpc)
+                .with_temporality(export_target.temporality.unwrap_or(Temporality::Cumulative))
+                .build()
+            {
                 Ok(exporter) => exporter,
                 Err(e) => {
                     error!(
@@ -357,27 +317,16 @@ fn init_metrics(config: Config) -> (Option<PrometheusRegistry>, SdkMeterProvider
                 }
             };
 
-            let reader = PeriodicReader::builder(exporter, runtime::Tokio)
+            let reader = PeriodicReader::builder(exporter)
                 .with_interval(Duration::from_secs(export_target.interval_secs))
-                .with_timeout(Duration::from_secs(export_target.timeout))
                 .build();
             meter_provider_builder = meter_provider_builder.with_reader(reader);
         }
     }
 
     if config.emit_metrics_to_stdout {
-        let exporter = MetricsExporterBuilder::default()
-            .with_encoder(|writer, data| {
-                if let Err(e) = serde_json::to_writer_pretty(writer, &data) {
-                    error!("writing metrics to log failed due to: {e:?}");
-                }
-                Ok(())
-            })
-            .build();
-
-        let reader = PeriodicReader::builder(exporter, runtime::Tokio)
-            .with_timeout(Duration::from_secs(30))
-            .build();
+        let exporter = json_metric_exporter::JsonMetricExporter::default();
+        let reader = PeriodicReader::builder(exporter).build();
         meter_provider_builder = meter_provider_builder.with_reader(reader);
     }
 
@@ -407,7 +356,7 @@ async fn httpserver_init(http_port: u16, registry: Registry) -> Result<(), hyper
 
 async fn metrics_handler(
     Extension(data): Extension<Registry>,
-) -> axum::response::Result<impl axum::response::IntoResponse> {
+) -> impl axum::response::IntoResponse {
     let mut buffer = vec![];
     let encoder = TextEncoder::new();
     let metric_families = data.gather();
@@ -415,26 +364,29 @@ async fn metrics_handler(
         Ok(()) => {
             let content_type = encoder.format_type().to_owned();
             let body = String::from_utf8_lossy(&buffer).into_owned();
-            Ok((
+            (
                 StatusCode::OK,
                 [(http::header::CONTENT_TYPE, content_type)],
                 body,
-            ))
+            )
         }
-        Err(e) => Ok((
+        Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             [(http::header::CONTENT_TYPE, "text".to_string())],
             e.to_string(),
-        )),
+        ),
     }
 }
 
-fn handle_tls(
-    exporter_builder: TonicExporterBuilder,
+fn handle_tls<B>(
+    exporter_builder: B,
     url: &str,
     ca_cert_path: Option<String>,
     timeout: Duration,
-) -> Result<TonicExporterBuilder, OtelError> {
+) -> Result<B, OtelError>
+where
+    B: WithTonicConfig,
+{
     let (server_name, server_port, scheme) = {
         let url = Url::parse(url).map_err(OtelError::InvalidEndpointUrl)?;
         let server_name = url
@@ -452,7 +404,7 @@ fn handle_tls(
     if scheme.eq("https") || scheme.eq("grpcs") {
         let tonic_endpoint = tonic::transport::channel::Endpoint::try_from(url.to_owned())
             .map_err(|e| {
-                OtelError::GrpcClientError(format!("error creating tonic channel to {url}: {e:?}",))
+                OtelError::GrpcClientError(format!("error creating tonic channel to {url}: {e:?}"))
             })?;
 
         let method = SslMethod::tls();
@@ -542,16 +494,12 @@ pub enum OtelError {
     PrometheusServerStopped,
 }
 
-#[derive(Clone)]
-struct AuthIntercepter {
+fn auth_interceptor(
     bearer_token_provider_fn: fn() -> String,
-}
-
-impl Interceptor for AuthIntercepter {
-    fn call(&mut self, request: tonic::Request<()>) -> Result<tonic::Request<()>, Status> {
-        let bearer_token = (self.bearer_token_provider_fn)();
-        let mut modified_request = request;
-        let metadata = modified_request.metadata_mut();
+) -> impl FnMut(tonic::Request<()>) -> Result<tonic::Request<()>, Status> + Clone {
+    move |mut request: tonic::Request<()>| {
+        let bearer_token = bearer_token_provider_fn();
+        let metadata = request.metadata_mut();
 
         match AsciiMetadataValue::from_str(&format!("Bearer {bearer_token}")) {
             Ok(auth_header) => {
@@ -561,7 +509,7 @@ impl Interceptor for AuthIntercepter {
                 error!("unable to set auth header due to {e:?}");
             }
         }
-        Ok(modified_request)
+        Ok(request)
     }
 }
 

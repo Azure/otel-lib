@@ -41,7 +41,7 @@ use tokio_openssl::SslStream;
 use tokio_stream::wrappers::TcpListenerStream;
 use tonic::{
     async_trait,
-    service::interceptor,
+    service::InterceptorLayer,
     transport::{server::Connected, Server},
     Request, Response, Status,
 };
@@ -231,7 +231,9 @@ impl OtlpServer {
 
             if self.auth_enabled {
                 Server::builder()
-                    .layer(ServiceBuilder::new().layer(interceptor(Self::auth_interceptor)))
+                    .layer(
+                        ServiceBuilder::new().layer(InterceptorLayer::new(Self::auth_interceptor)),
+                    )
                     .add_service(metrics_service)
                     .add_service(logs_service)
                     .serve_with_incoming_shutdown(incoming, recv_wrapper(self.shutdown_rx))
@@ -251,7 +253,9 @@ impl OtlpServer {
             if self.auth_enabled {
                 // Start the server
                 Server::builder()
-                    .layer(ServiceBuilder::new().layer(interceptor(Self::auth_interceptor)))
+                    .layer(
+                        ServiceBuilder::new().layer(InterceptorLayer::new(Self::auth_interceptor)),
+                    )
                     .add_service(metrics_service)
                     .add_service(logs_service)
                     .serve_with_incoming_shutdown(incoming, recv_wrapper(self.shutdown_rx))

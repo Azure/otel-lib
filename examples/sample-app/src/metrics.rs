@@ -31,12 +31,12 @@ impl Default for StaticMetrics {
         info!("initializing static metrics");
         let meter = global::meter_provider().meter(METER_NAME);
         StaticMetrics {
-            requests: meter.u64_counter("requests").init(),
-            request_sizes: meter.u64_histogram("requestsizes").init(),
-            request_sizes_f64: meter.f64_histogram("requestsizes.f64").init(),
-            connection_errors: meter.u64_counter("connectionerrors").init(),
-            updown_counter: meter.f64_up_down_counter("updown_counter").init(),
-            observable_gauge: meter.u64_observable_gauge("observable_guage").init(),
+            requests: meter.u64_counter("requests").build(),
+            request_sizes: meter.u64_histogram("requestsizes").build(),
+            request_sizes_f64: meter.f64_histogram("requestsizes.f64").build(),
+            connection_errors: meter.u64_counter("connectionerrors").build(),
+            updown_counter: meter.f64_up_down_counter("updown_counter").build(),
+            observable_gauge: meter.u64_observable_gauge("observable_guage").build(),
         }
     }
 }

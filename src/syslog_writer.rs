@@ -10,13 +10,13 @@ pub(crate) fn write_syslog_format(
     record: &Record<'_>,
     service_name: &str,
     host_name: &str,
-    timestamp: &SystemTime,
+    timestamp: SystemTime,
 ) {
     // Write to stderr
     // TODO: check if there is any benefit to buffering this write, given the trade-off of missing logs if the app panics.
     let level = to_syslog_level(record.level());
-    let timestamp = format_rfc3339_millis(*timestamp);
-    let thread_id = nix::unistd::gettid().as_raw();
+    let timestamp = format_rfc3339_millis(timestamp);
+    let thread_id = format!("{:?}", std::thread::current().id());
 
     if record.level() >= Level::Debug {
         // Only include more verbose module level on Debug and Trace logs

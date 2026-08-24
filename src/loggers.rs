@@ -7,19 +7,20 @@ use std::{
 };
 
 use crate::{
+    auth_interceptor,
     config::Config,
-    filtered_log_processor::{FilteredBatchConfig, FilteredBatchLogProcessor},
-    handle_tls, syslog_writer, AuthIntercepter, SERVICE_NAME_KEY,
+    filtered_log_processor::{FilteredBatchConfig, FilteredLogProcessor},
+    handle_tls, syslog_writer, SERVICE_NAME_KEY,
 };
 use log::Level;
 use opentelemetry::{
     logs::{AnyValue, LogRecord, Logger, Severity},
     KeyValue,
 };
-use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_otlp::{Protocol, WithExportConfig, WithTonicConfig};
 use opentelemetry_sdk::{
-    logs::{BatchConfigBuilder, BatchLogProcessor, LoggerProvider},
-    runtime, Resource,
+    logs::{BatchConfigBuilder, BatchLogProcessor, SdkLoggerProvider},
+    Resource,
 };
 
 pub(crate) struct OtelLogBridge<P, L>
@@ -52,7 +53,7 @@ where
                 record,
                 &self.service_name_with_iana_number,
                 &self.host_name,
-                &timestamp,
+                timestamp,
             );
         }
 
@@ -61,8 +62,9 @@ where
         let mut log_record = self.logger.create_log_record();
         log_record.set_body(AnyValue::from(record.args().to_string()));
         log_record.set_severity_number(to_otel_severity(record.level()));
-        log_record.set_severity_text(record.level().as_str().into());
+        log_record.set_severity_text(record.level().as_str());
         log_record.set_timestamp(timestamp);
+        log_record.set_target(record.target().to_string());
 
         // Add target as an attribute so it can be filtered
         log_record.add_attribute("target", AnyValue::from(record.target().to_string()));
@@ -90,7 +92,7 @@ where
             None => service_name.to_string(),
         };
         OtelLogBridge {
-            logger: provider.logger_builder(service_name.to_string()).build(),
+            logger: provider.logger(service_name.to_string()),
             std_err_enabled,
             host_name,
             service_name_with_iana_number,
@@ -109,31 +111,32 @@ const fn to_otel_severity(level: Level) -> Severity {
     }
 }
 
-pub(crate) fn init_logs(config: Config) -> Result<LoggerProvider, log::SetLoggerError> {
+pub(crate) fn init_logs(config: Config) -> Result<SdkLoggerProvider, log::SetLoggerError> {
     let mut keys = vec![KeyValue::new(SERVICE_NAME_KEY, config.service_name.clone())];
     if let Some(resource_attributes) = config.resource_attributes {
         for attribute in resource_attributes {
             keys.push(KeyValue::new(attribute.key, attribute.value));
         }
     }
-    let mut logger_provider_builder = LoggerProvider::builder().with_resource(Resource::new(keys));
+    let resource = Resource::builder_empty().with_attributes(keys).build();
+    let mut logger_provider_builder = SdkLoggerProvider::builder().with_resource(resource);
 
-    let host_name = nix::unistd::gethostname()
+    let host_name = hostname::get()
         .map(|hostname| {
             hostname
                 .into_string()
                 .unwrap_or_else(|hostname| hostname.to_string_lossy().into_owned())
         })
-        .unwrap_or_default();
+        .or_else(|_| std::env::var("HOSTNAME"))
+        .or_else(|_| std::env::var("COMPUTERNAME"))
+        .unwrap_or_else(|_| "localhost".to_string());
 
     if let Some(export_target_list) = config.log_export_targets {
         for export_target in export_target_list {
-            let mut exporter_builder = opentelemetry_otlp::new_exporter().tonic();
+            let mut exporter_builder = opentelemetry_otlp::LogExporter::builder().with_tonic();
             if let Some(bearer_token_provider_fn) = export_target.bearer_token_provider_fn {
-                let auth_interceptor = AuthIntercepter {
-                    bearer_token_provider_fn,
-                };
-                exporter_builder = exporter_builder.with_interceptor(auth_interceptor);
+                exporter_builder =
+                    exporter_builder.with_interceptor(auth_interceptor(bearer_token_provider_fn));
             }
 
             exporter_builder = match handle_tls(
@@ -150,7 +153,9 @@ pub(crate) fn init_logs(config: Config) -> Result<LoggerProvider, log::SetLogger
 
             let exporter = match exporter_builder
                 .with_endpoint(export_target.url.clone())
-                .build_log_exporter()
+                .with_timeout(Duration::from_secs(export_target.timeout))
+                .with_protocol(Protocol::Grpc)
+                .build()
             {
                 Ok(exporter) => exporter,
                 Err(e) => {
@@ -167,23 +172,27 @@ pub(crate) fn init_logs(config: Config) -> Result<LoggerProvider, log::SetLogger
                 let filtered_batch_config = FilteredBatchConfig {
                     export_severity,
                     target_filters: export_target.target_filters.clone(),
-                    scheduled_delay: Duration::from_secs(export_target.interval_secs),
-                    max_export_timeout: Duration::from_secs(export_target.timeout),
-                    ..Default::default()
                 };
 
-                let filtered_log_processor =
-                    FilteredBatchLogProcessor::builder(exporter, runtime::Tokio)
-                        .with_batch_config(filtered_batch_config)
-                        .build();
+                let filtered_log_processor = FilteredLogProcessor::new(
+                    BatchLogProcessor::builder(exporter)
+                        .with_batch_config(
+                            BatchConfigBuilder::default()
+                                .with_scheduled_delay(Duration::from_secs(
+                                    export_target.interval_secs,
+                                ))
+                                .build(),
+                        )
+                        .build(),
+                    filtered_batch_config,
+                );
                 logger_provider_builder =
                     logger_provider_builder.with_log_processor(filtered_log_processor);
             } else {
-                let batch_log_processor = BatchLogProcessor::builder(exporter, runtime::Tokio)
+                let batch_log_processor = BatchLogProcessor::builder(exporter)
                     .with_batch_config(
                         BatchConfigBuilder::default()
                             .with_scheduled_delay(Duration::from_secs(export_target.interval_secs))
-                            .with_max_export_timeout(Duration::from_secs(export_target.timeout))
                             .build(),
                     )
                     .build();

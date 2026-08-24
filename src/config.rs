@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 use opentelemetry::logs::Severity;
-use opentelemetry_sdk::metrics::data::Temporality;
+pub use opentelemetry_sdk::metrics::Temporality;
 use serde::Deserialize;
 
 /// Observability configuration
@@ -119,9 +119,10 @@ pub struct Attribute {
 #[cfg(test)]
 mod tests {
     use opentelemetry::logs::Severity;
-    use opentelemetry_sdk::metrics::data::Temporality;
 
-    use super::{Attribute, Config, LogsExportTarget, MetricsExportTarget, Prometheus};
+    use super::{
+        Attribute, Config, LogsExportTarget, MetricsExportTarget, Prometheus, Temporality,
+    };
 
     #[test]
     fn test_default_config() {
