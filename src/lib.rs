@@ -6,7 +6,6 @@
 
 use std::{collections::HashSet, path::PathBuf, str::FromStr, sync::Arc, time::Duration};
 
-use hyper::StatusCode;
 use hyper_util::rt::TokioIo;
 use log::{debug, error, info, warn};
 
@@ -15,7 +14,10 @@ use notify_debouncer_mini::{new_debouncer, DebouncedEvent, Debouncer};
 use openssl::ssl::{SslConnector, SslConnectorBuilder, SslMethod};
 use opentelemetry::{global, KeyValue};
 
-use axum::{http, Extension};
+use axum::{
+    http::{self, StatusCode},
+    Extension,
+};
 
 use opentelemetry_otlp::{ExportConfig, Protocol, TonicExporterBuilder, WithExportConfig};
 use opentelemetry_sdk::{
@@ -394,20 +396,19 @@ fn init_metrics(config: Config) -> (Option<PrometheusRegistry>, SdkMeterProvider
 /// * `registry` - The prometheus registry that contains the metrics
 ///
 /// # Errors
-/// * `hyper::Error` - If the http server fails to start
-async fn httpserver_init(http_port: u16, registry: Registry) -> Result<(), hyper::Error> {
+/// * `std::io::Error` - If the http server fails to start
+async fn httpserver_init(http_port: u16, registry: Registry) -> Result<(), std::io::Error> {
     info!("initializing prometheus metrics endpoint");
     let router = axum::Router::new()
         .route("/metrics", axum::routing::get(metrics_handler))
         .layer(Extension(registry));
-    axum::Server::bind(&([0u8; 4], http_port).into())
-        .serve(router.into_make_service())
-        .await
+    let listener = tokio::net::TcpListener::bind(format!("0.0.0.0:{http_port}")).await?;
+    axum::serve(listener, router).await
 }
 
 async fn metrics_handler(
     Extension(data): Extension<Registry>,
-) -> axum::response::Result<impl axum::response::IntoResponse> {
+) -> Result<impl axum::response::IntoResponse, std::convert::Infallible> {
     let mut buffer = vec![];
     let encoder = TextEncoder::new();
     let metric_families = data.gather();

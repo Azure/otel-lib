@@ -54,7 +54,7 @@ async fn main() {
         emit_metrics_to_stdout: false,
         metrics_export_targets: metrics_targets,
         log_export_targets: logs_targets,
-        level: "info,hyper=off".to_owned(),
+        level: "info".to_owned(),
         service_name: "sample-app".to_owned(),
         enterprise_number: Some("123".to_owned()),
         resource_attributes: Some(vec![Attribute {

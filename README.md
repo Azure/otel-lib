@@ -54,7 +54,7 @@ let config = Config {
     emit_logs_to_stderr: true,
     metrics_export_targets: Some(metric_targets),
     log_export_targets: Some(log_targets),
-    level: "info,hyper=off".to_owned(),
+    level: "info".to_owned(),
     resource_attributes: Some(vec![Attribute {
         key: "resource_key1".to_owned(),
         value: "1".to_owned(),

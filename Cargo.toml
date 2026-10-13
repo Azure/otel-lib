@@ -11,14 +11,13 @@ publish = true
 
 
 [dependencies]
-axum = "0.6"
+axum = "0.8"
 env_filter = "0.1"
 futures = "0.3"
 futures-channel = "0.3"
 futures-executor = "0.3"
 futures-util = "0.3"
 humantime = "2.1"
-hyper = { version = "0.14", features = ["http1", "server"] }
 hyper-util = "0.1"
 log = { version = "0.4", default-features = false }
 notify = "6"
@@ -61,13 +60,14 @@ tokio-stream = "0.1"
 uuid = { version = "1", features = ["v4"] }
 
 [lints.rust]
-rust_2018_idioms = "warn"
+rust_2018_idioms = { level = "deny", priority = -1 }
 
 
 [lints.clippy]
 all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 default_trait_access = "allow"
+doc_overindented_list_items = "allow"
 enum_variant_names = "allow"
 let_and_return = "allow"
 let_unit_value = "allow"
@@ -76,8 +76,8 @@ missing_panics_doc = "allow"
 module_inception = "allow"
 module_name_repetitions = "allow"
 must_use_candidate = "allow"
-# TODO(rustup): Buggy lint: https://github.com/rust-lang/rust-clippy/issues/12279
-no_effect_underscore_binding = "allow"
+needless_continue = "allow"
+result_large_err = "allow"
 return_self_not_must_use = "allow"
 similar_names = "allow"
 struct_field_names = "allow"
