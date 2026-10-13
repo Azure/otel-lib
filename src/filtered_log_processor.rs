@@ -390,7 +390,7 @@ mod tests {
             max_queue_size: 100,
             scheduled_delay: Duration::from_millis(100),
             max_export_batch_size: 10,
-            max_export_timeout: Duration::from_millis(1000),
+            max_export_timeout: Duration::from_secs(1),
             export_severity,
             target_filters,
         }

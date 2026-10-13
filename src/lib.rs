@@ -452,7 +452,7 @@ fn handle_tls(
     if scheme.eq("https") || scheme.eq("grpcs") {
         let tonic_endpoint = tonic::transport::channel::Endpoint::try_from(url.to_owned())
             .map_err(|e| {
-                OtelError::GrpcClientError(format!("error creating tonic channel to {url}: {e:?}",))
+                OtelError::GrpcClientError(format!("error creating tonic channel to {url}: {e:?}"))
             })?;
 
         let method = SslMethod::tls();
