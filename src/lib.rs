@@ -6,19 +6,19 @@
 
 use std::{collections::HashSet, path::PathBuf, str::FromStr, sync::Arc, time::Duration};
 
-use hyper_util::rt::TokioIo;
-use log::{debug, error, info, warn};
-
-use notify::{RecommendedWatcher, RecursiveMode};
-use notify_debouncer_mini::{new_debouncer, DebouncedEvent, Debouncer};
-use openssl::ssl::{SslConnector, SslConnectorBuilder, SslMethod};
-use opentelemetry::{global, KeyValue};
-
 use axum::{
     http::{self, StatusCode},
     Extension,
 };
-
+use hyper_util::rt::TokioIo;
+use log::{debug, error, info, warn};
+use notify_debouncer_mini::{
+    new_debouncer,
+    notify::{self, RecommendedWatcher, RecursiveMode},
+    DebouncedEvent, Debouncer,
+};
+use openssl::ssl::{SslConnector, SslConnectorBuilder, SslMethod};
+use opentelemetry::{global, KeyValue};
 use opentelemetry_otlp::{ExportConfig, Protocol, TonicExporterBuilder, WithExportConfig};
 use opentelemetry_sdk::{
     logs::LoggerProvider,
@@ -29,10 +29,8 @@ use opentelemetry_sdk::{
     },
     runtime, Resource,
 };
-
 // TODO: evaluate if we should keep supporting writing metrics to stdout.
 use opentelemetry_stdout::MetricsExporterBuilder;
-
 use prometheus::{Encoder, Registry, TextEncoder};
 use tokio::{net::TcpStream, sync::mpsc};
 use tokio_openssl::SslStream;
