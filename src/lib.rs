@@ -44,7 +44,6 @@ mod filtered_log_processor;
 pub mod loggers;
 pub mod syslog_writer;
 
-pub(crate) const SERVICE_NAME_KEY: &str = "service.name";
 pub const OTEL_SHUTDOWN_TIMEOUT_SECS: u64 = 30;
 
 struct PrometheusRegistry {

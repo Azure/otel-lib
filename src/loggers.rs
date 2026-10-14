@@ -9,7 +9,7 @@ use std::{
 use crate::{
     config::Config,
     filtered_log_processor::{FilteredBatchConfig, FilteredBatchLogProcessor},
-    handle_tls, syslog_writer, AuthIntercepter, SERVICE_NAME_KEY,
+    handle_tls, syslog_writer, AuthIntercepter,
 };
 use log::Level;
 use opentelemetry::{
@@ -18,7 +18,7 @@ use opentelemetry::{
 };
 use opentelemetry_otlp::WithExportConfig;
 use opentelemetry_sdk::{
-    logs::{BatchConfigBuilder, BatchLogProcessor, LoggerProvider},
+    logs::{BatchConfigBuilder, BatchLogProcessor, SdkLoggerProvider},
     runtime, Resource,
 };
 
@@ -109,14 +109,14 @@ const fn to_otel_severity(level: Level) -> Severity {
     }
 }
 
-pub(crate) fn init_logs(config: Config) -> Result<LoggerProvider, log::SetLoggerError> {
-    let mut keys = vec![KeyValue::new(SERVICE_NAME_KEY, config.service_name.clone())];
+pub(crate) fn init_logs(config: Config) -> Result<SdkLoggerProvider, log::SetLoggerError> {
+    let mut resource = Resource::builder().with_service_name(config.service_name.clone());
     if let Some(resource_attributes) = config.resource_attributes {
         for attribute in resource_attributes {
-            keys.push(KeyValue::new(attribute.key, attribute.value));
+            resource.with_attribute(KeyValue::new(attribute.key, attribute.value));
         }
     }
-    let mut logger_provider_builder = LoggerProvider::builder().with_resource(Resource::new(keys));
+    let mut logger_provider_builder = SdkLoggerProvider::builder().with_resource(resource.build());
 
     let host_name = nix::unistd::gethostname()
         .map(|hostname| {
