@@ -17,7 +17,7 @@ jobs:
     outputs:
       matrix: "${{ steps.run.outputs.matrix }}"
     steps:
-      - uses: "actions/checkout@v3"
+      - uses: "actions/checkout@a37ce9120846195fa4ece8f58b268e6043cb2f26" # v3.7.0
       - id: "run"
         run: "make test"
 
@@ -29,8 +29,8 @@ jobs:
       matrix:
         include: ${{ fromJSON(needs.find.outputs.matrix) }}
     steps:
-      - uses: "actions/checkout@v3"
-      - uses: "actions/cache@v3"
+      - uses: "actions/checkout@a37ce9120846195fa4ece8f58b268e6043cb2f26" # v3.7.0
+      - uses: "actions/cache@6f8efc29b200d32929f49075959781ed54ec270c" # v3.5.0
         with:
           path: |
             ~/.cargo/.crates.toml
@@ -60,7 +60,7 @@ jobs:
       # essentially required owing to the fact that
       # `actions/download-artifact` does not support filtering artifact
       # names when fetching multiple artifacts.
-      - uses: "actions/upload-artifact@v3"
+      - uses: "actions/upload-artifact@ff15f0306b3f739f7b6fd43fb5d26cd321bd4de5" # v3.2.1
         with:
           # WARN: The workspace name is not necessarily globally unique.
           # If two workspaces have the same directory name, they will
@@ -74,8 +74,8 @@ jobs:
     runs-on: "ubuntu-22.04"
     needs: "run"
     steps:
-      - uses: "actions/checkout@v3"
-      - uses: "actions/download-artifact@v4.1.7"
+      - uses: "actions/checkout@a37ce9120846195fa4ece8f58b268e6043cb2f26" # v3.7.0
+      - uses: "actions/download-artifact@65a9edc5881444af0b9093a5e628f2fe47ea3b2e" # v4.1.7
       # NOTE: `ci/comment.sh` could be written inline, but this would
       # make it harder to test manually and verify with shellcheck.
       # The consequence of not writing the script inline, however, is
