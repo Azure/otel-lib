@@ -7,16 +7,17 @@ use std::{
 };
 
 use crate::{
+    build_channel,
     config::Config,
     filtered_log_processor::{FilteredBatchConfig, FilteredBatchLogProcessor},
-    handle_tls, syslog_writer, AuthIntercepter,
+    syslog_writer, AuthIntercepter,
 };
 use log::Level;
 use opentelemetry::{
     logs::{AnyValue, LogRecord, Logger, Severity},
     KeyValue,
 };
-use opentelemetry_otlp::WithExportConfig;
+use opentelemetry_otlp::{LogExporterBuilder, WithExportConfig, WithTonicConfig};
 use opentelemetry_sdk::{
     logs::{BatchConfigBuilder, BatchLogProcessor, SdkLoggerProvider},
     runtime, Resource,
@@ -61,7 +62,7 @@ where
         let mut log_record = self.logger.create_log_record();
         log_record.set_body(AnyValue::from(record.args().to_string()));
         log_record.set_severity_number(to_otel_severity(record.level()));
-        log_record.set_severity_text(record.level().as_str().into());
+        log_record.set_severity_text(record.level().as_str());
         log_record.set_timestamp(timestamp);
 
         // Add target as an attribute so it can be filtered
@@ -90,7 +91,7 @@ where
             None => service_name.to_string(),
         };
         OtelLogBridge {
-            logger: provider.logger_builder(service_name.to_string()).build(),
+            logger: provider.logger(service_name.to_string()),
             std_err_enabled,
             host_name,
             service_name_with_iana_number,
@@ -113,7 +114,7 @@ pub(crate) fn init_logs(config: Config) -> Result<SdkLoggerProvider, log::SetLog
     let mut resource = Resource::builder().with_service_name(config.service_name.clone());
     if let Some(resource_attributes) = config.resource_attributes {
         for attribute in resource_attributes {
-            resource.with_attribute(KeyValue::new(attribute.key, attribute.value));
+            resource = resource.with_attribute(KeyValue::new(attribute.key, attribute.value));
         }
     }
     let mut logger_provider_builder = SdkLoggerProvider::builder().with_resource(resource.build());
@@ -128,7 +129,9 @@ pub(crate) fn init_logs(config: Config) -> Result<SdkLoggerProvider, log::SetLog
 
     if let Some(export_target_list) = config.log_export_targets {
         for export_target in export_target_list {
-            let mut exporter_builder = opentelemetry_otlp::new_exporter().tonic();
+            let mut exporter_builder = LogExporterBuilder::new().with_tonic();
+            exporter_builder =
+                exporter_builder.with_timeout(Duration::from_secs(export_target.timeout));
             if let Some(bearer_token_provider_fn) = export_target.bearer_token_provider_fn {
                 let auth_interceptor = AuthIntercepter {
                     bearer_token_provider_fn,
@@ -136,21 +139,27 @@ pub(crate) fn init_logs(config: Config) -> Result<SdkLoggerProvider, log::SetLog
                 exporter_builder = exporter_builder.with_interceptor(auth_interceptor);
             }
 
-            exporter_builder = match handle_tls(
-                exporter_builder,
+            match build_channel(
                 &export_target.url,
                 export_target.ca_cert_path,
                 Duration::from_secs(export_target.timeout),
             ) {
-                Ok(exporter_builder) => exporter_builder,
-                Err(_) => {
+                Ok(Some(channel)) => {
+                    exporter_builder = exporter_builder.with_channel(channel);
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    eprintln!(
+                        "unable to build tls channel to {} due to {:?}",
+                        export_target.url, e
+                    );
                     continue;
                 }
-            };
+            }
 
             let exporter = match exporter_builder
                 .with_endpoint(export_target.url.clone())
-                .build_log_exporter()
+                .build()
             {
                 Ok(exporter) => exporter,
                 Err(e) => {
@@ -179,11 +188,10 @@ pub(crate) fn init_logs(config: Config) -> Result<SdkLoggerProvider, log::SetLog
                 logger_provider_builder =
                     logger_provider_builder.with_log_processor(filtered_log_processor);
             } else {
-                let batch_log_processor = BatchLogProcessor::builder(exporter, runtime::Tokio)
+                let batch_log_processor = BatchLogProcessor::builder(exporter)
                     .with_batch_config(
                         BatchConfigBuilder::default()
                             .with_scheduled_delay(Duration::from_secs(export_target.interval_secs))
-                            .with_max_export_timeout(Duration::from_secs(export_target.timeout))
                             .build(),
                     )
                     .build();

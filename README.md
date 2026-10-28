@@ -19,8 +19,8 @@ The framework is configurable using the `Config` struct to setup
 
 Add the following to your cargo.toml
 ~~~
-opentelemetry = { version = "0.24", features = ["metrics", "logs"]}
-opentelemetry_sdk =  {version = "0.24", features = ["metrics", "logs", "rt-tokio", "logs_level_enabled"]}
+opentelemetry = { version = "0.33", features = ["metrics", "logs"]}
+opentelemetry_sdk =  {version = "0.33", features = ["metrics", "logs", "rt-tokio"]}
 ~~~
 
 Do the following as early as you can in your control flow
@@ -30,7 +30,7 @@ let metric_targets = vec![MetricsExportTarget {
         url: "http://localhost:4317".to_string(),
         interval_secs: 30,
         timeout: 15,
-        temporality: Temporality::Cumulative, // Set to one of Some(Temporality::Cumulative) or Some(Temporality::Delta) or None (which defaults to Cumulative)
+        temporality: Some(Temporality::Cumulative), // Or Some(Temporality::Delta) or None (which defaults to Cumulative)
         ca_cert_path: Some("path".to_owned()),
         bearer_token_provider_fn: Some(token_provider_fn)
     }];
@@ -40,6 +40,7 @@ let log_targets = vec![LogsExportTarget {
     interval_secs: 10,
     timeout: 15,
     export_severity: Some(Severity::Error), // Applies an additional filter at the exporter level. This can be set to `None` if no additional filtering is required.
+    target_filters: None,
     ca_cert_path: Some("path".to_owned()),
     bearer_token_provider_fn: Some(token_provider_fn)
 }];
@@ -85,8 +86,8 @@ impl Default for StaticMetrics {
         info!("initializing static metrics");
         let meter = global::meter_provider().meter(METER_NAME);
         StaticMetrics {
-            requests: meter.u64_counter("requests").init(),
-            errors: meter.u64_counter("errors").init(),
+            requests: meter.u64_counter("requests").build(),
+            errors: meter.u64_counter("errors").build(),
         }
     }
 }

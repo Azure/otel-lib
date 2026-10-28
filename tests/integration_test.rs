@@ -15,13 +15,13 @@ use mocks::{
     clean_up_bearer_token, create_or_update_bearer_token, generate_self_signed_cert,
     get_test_bearer_token, MockServer,
 };
-use opentelemetry::{global, logs::Severity, metrics::MeterProvider};
+use opentelemetry::{global, logs::Severity};
 use opentelemetry_proto::tonic::collector::logs::v1::ExportLogsServiceRequest;
 use opentelemetry_proto::tonic::collector::metrics::v1::ExportMetricsServiceRequest;
 use opentelemetry_proto::tonic::common::v1::any_value::Value::{self, StringValue};
 use opentelemetry_proto::tonic::common::v1::{AnyValue, KeyValue};
 use opentelemetry_proto::tonic::metrics::v1::AggregationTemporality;
-use opentelemetry_sdk::metrics::data::Temporality;
+use opentelemetry_sdk::metrics::Temporality;
 use otel_lib::{
     config::{Attribute, Config, LogsExportTarget, MetricsExportTarget, Prometheus},
     Otel,
@@ -233,7 +233,7 @@ async fn run_tests(
 ) {
     create_or_update_bearer_token();
     let meter = global::meter_provider().meter("end_to_end_test");
-    let test_counter = meter.u64_counter("test_counter").init();
+    let test_counter = meter.u64_counter("test_counter").build();
     test_counter.add(1, &[]);
 
     // validate that the metric is exported to the OTLP targets
@@ -282,20 +282,27 @@ async fn run_tests(
     error!("{error_log}"); // should be logged by otel-lib and exported to both OTLP targets
 
     // Check that the filtered target only receives the error log
-    validate_filtered_logs(filtered_logs_rx, error_log.to_owned()).await;
-    validate_filtered_logs(filtered_logs_with_tls_rx, error_log.to_owned()).await;
+    validate_filtered_logs(filtered_logs_rx, error_log.to_owned(), sample_attribute).await;
+    validate_filtered_logs(
+        filtered_logs_with_tls_rx,
+        error_log.to_owned(),
+        sample_attribute,
+    )
+    .await;
 
     // Check that the unfiltered target receives both warn and error log
     validate_unfiltered_logs(
         unfiltered_logs_rx,
         error_log.to_owned(),
         warn_log.to_owned(),
+        sample_attribute,
     )
     .await;
     validate_unfiltered_logs(
         unfiltered_logs_with_tls_rx,
         error_log.to_owned(),
         warn_log.to_owned(),
+        sample_attribute,
     )
     .await;
 }
@@ -374,6 +381,7 @@ async fn validate_test_counter(
         value: Some(AnyValue {
             value: Some(StringValue(sample_attribute.value.clone())),
         }),
+        ..Default::default()
     };
     //validate resource attribute
     assert!(get_resource_attributes(&metrics_export_request).contains(&kv));
@@ -397,12 +405,14 @@ async fn validate_test_counter_prometheus(prom_port: u16) {
 async fn validate_filtered_logs(
     mut filtered_logs_rx: Receiver<ExportLogsServiceRequest>,
     error_log: String,
+    sample_attribute: &Attribute,
 ) {
     // Check that the filtered target only receives the error log
     let logs_export_request = timeout(Duration::from_secs(2), filtered_logs_rx.recv())
         .await
         .unwrap()
         .unwrap();
+    validate_log_resource(&logs_export_request, sample_attribute);
     let mut log_messages = get_log_messages(&logs_export_request);
     assert_eq!(log_messages.len(), 1);
     assert_eq!(log_messages.pop().unwrap(), Value::StringValue(error_log));
@@ -417,11 +427,13 @@ async fn validate_unfiltered_logs(
     mut logs_rx: Receiver<ExportLogsServiceRequest>,
     error_log: String,
     warn_log: String,
+    sample_attribute: &Attribute,
 ) {
     let logs_export_request = timeout(Duration::from_secs(2), logs_rx.recv())
         .await
         .unwrap()
         .unwrap();
+    validate_log_resource(&logs_export_request, sample_attribute);
     let mut log_messages = get_log_messages(&logs_export_request);
     // If not all logs received, wait for the next export.
     if log_messages.len() == 1 {
@@ -442,4 +454,21 @@ async fn validate_unfiltered_logs(
     assert!(timeout(Duration::from_secs(2), logs_rx.recv())
         .await
         .is_err());
+}
+
+fn validate_log_resource(request: &ExportLogsServiceRequest, attribute: &Attribute) {
+    let resource = request
+        .resource_logs
+        .first()
+        .unwrap()
+        .resource
+        .as_ref()
+        .unwrap();
+    assert!(resource.attributes.contains(&KeyValue {
+        key: attribute.key.clone(),
+        value: Some(AnyValue {
+            value: Some(StringValue(attribute.value.clone())),
+        }),
+        ..Default::default()
+    }));
 }

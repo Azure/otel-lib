@@ -19,28 +19,23 @@ use notify_debouncer_mini::{
 };
 use openssl::ssl::{SslConnector, SslConnectorBuilder, SslMethod};
 use opentelemetry::{global, KeyValue};
-use opentelemetry_otlp::{ExportConfig, Protocol, TonicExporterBuilder, WithExportConfig};
+use opentelemetry_otlp::{MetricExporterBuilder, Protocol, WithExportConfig, WithTonicConfig};
 use opentelemetry_sdk::{
-    logs::LoggerProvider,
-    metrics::{
-        data::Temporality,
-        reader::{DefaultAggregationSelector, DefaultTemporalitySelector, TemporalitySelector},
-        InstrumentKind, PeriodicReader, SdkMeterProvider,
-    },
+    logs::SdkLoggerProvider,
+    metrics::{PeriodicReader, SdkMeterProvider, Temporality},
     runtime, Resource,
 };
-// TODO: evaluate if we should keep supporting writing metrics to stdout.
-use opentelemetry_stdout::MetricsExporterBuilder;
 use prometheus::{Encoder, Registry, TextEncoder};
 use tokio::{net::TcpStream, sync::mpsc};
 use tokio_openssl::SslStream;
-use tonic::{metadata::AsciiMetadataValue, service::Interceptor, Status};
+use tonic::{metadata::AsciiMetadataValue, service::Interceptor, transport::Channel, Status};
 use url::Url;
 
 use self::config::Config;
 
 pub mod config;
 mod filtered_log_processor;
+mod json_metric_exporter;
 pub mod loggers;
 pub mod syslog_writer;
 
@@ -54,7 +49,7 @@ struct PrometheusRegistry {
 pub struct Otel {
     registry: Option<PrometheusRegistry>,
     meter_provider: SdkMeterProvider,
-    logger_provider: Option<LoggerProvider>,
+    logger_provider: Option<SdkLoggerProvider>,
     ca_cert_paths: HashSet<String>,
     shutdown_tx: mpsc::Sender<()>,
     shutdown_rx: mpsc::Receiver<()>,
@@ -246,23 +241,6 @@ fn create_watcher() -> Result<
     Ok((watcher, async_rx))
 }
 
-#[derive(Default, Debug)]
-/// A temporality selector that returns Delta for all instruments
-pub(crate) struct DeltaTemporalitySelector {}
-
-impl DeltaTemporalitySelector {
-    /// Create a new default temporality selector
-    fn new() -> Self {
-        Self::default()
-    }
-}
-
-impl TemporalitySelector for DeltaTemporalitySelector {
-    fn temporality(&self, _kind: InstrumentKind) -> Temporality {
-        Temporality::Delta
-    }
-}
-
 /// Initialize metrics based on passed in config.
 /// This function will setup metrics exporters, create a Prometheus registry if enabled,
 /// setup the stdout metrics writer if enabled, and initializes STATIC Metrics.
@@ -270,13 +248,13 @@ impl TemporalitySelector for DeltaTemporalitySelector {
 /// Returns the Prometheus Registry or None if Prometheus was disabled.
 #[allow(clippy::too_many_lines)]
 fn init_metrics(config: Config) -> (Option<PrometheusRegistry>, SdkMeterProvider) {
-    let mut keys = vec![KeyValue::new(SERVICE_NAME_KEY, config.service_name.clone())];
+    let mut resource = Resource::builder_empty().with_service_name(config.service_name.clone());
     if let Some(resource_attributes) = config.resource_attributes {
         for attribute in resource_attributes {
-            keys.push(KeyValue::new(attribute.key, attribute.value));
+            resource = resource.with_attribute(KeyValue::new(attribute.key, attribute.value));
         }
     }
-    let mut meter_provider_builder = SdkMeterProvider::builder().with_resource(Resource::new(keys));
+    let mut meter_provider_builder = SdkMeterProvider::builder().with_resource(resource.build());
 
     // Setup Prometheus Registry if configured
     let prometheus_registry = if let Some(prometheus_config) = config.prometheus_config {
@@ -304,48 +282,47 @@ fn init_metrics(config: Config) -> (Option<PrometheusRegistry>, SdkMeterProvider
     // Add Metrics Exporters
     if let Some(export_targets_list) = config.metrics_export_targets {
         for export_target in export_targets_list {
-            let export_config = ExportConfig {
-                endpoint: export_target.url.clone(),
-                timeout: Duration::from_secs(export_target.timeout),
-                protocol: Protocol::Grpc,
-            };
+            let mut exporter_builder = MetricExporterBuilder::new()
+                .with_tonic()
+                .with_endpoint(export_target.url.clone())
+                .with_timeout(Duration::from_secs(export_target.timeout))
+                .with_protocol(Protocol::Grpc);
 
-            let temporality_selector: Box<dyn TemporalitySelector> =
-                if let Some(temporality) = export_target.temporality {
-                    match temporality {
-                        Temporality::Delta => Box::new(DeltaTemporalitySelector::new()),
-                        _ => Box::new(DefaultTemporalitySelector::new()),
-                    }
-                } else {
-                    Box::new(DefaultTemporalitySelector::new())
-                };
+            let mut temporality = Temporality::default();
+            if let Some(target_temporality) = export_target.temporality {
+                if target_temporality == Temporality::Delta {
+                    temporality = Temporality::Delta;
+                }
+            }
 
-            let mut exporter_builder = opentelemetry_otlp::new_exporter().tonic();
+            exporter_builder = exporter_builder.with_temporality(temporality);
+
             if let Some(bearer_token_provider_fn) = export_target.bearer_token_provider_fn {
                 let auth_interceptor = AuthIntercepter {
                     bearer_token_provider_fn,
                 };
                 exporter_builder = exporter_builder.with_interceptor(auth_interceptor);
             }
-            exporter_builder = match handle_tls(
-                exporter_builder,
+
+            match build_channel(
                 &export_target.url,
                 export_target.ca_cert_path,
                 Duration::from_secs(export_target.timeout),
             ) {
-                Ok(exporter_builder) => exporter_builder,
-                Err(_) => {
+                Ok(Some(channel)) => {
+                    exporter_builder = exporter_builder.with_channel(channel);
+                }
+                Ok(None) => {}
+                Err(e) => {
+                    error!(
+                        "unable to build tls channel to {} due to {:?}",
+                        export_target.url, e
+                    );
                     continue;
                 }
-            };
+            }
 
-            let exporter = match exporter_builder
-                .with_export_config(export_config)
-                .build_metrics_exporter(
-                    // TODO: Make this also part of config?
-                    Box::new(DefaultAggregationSelector::new()),
-                    temporality_selector,
-                ) {
+            let exporter = match exporter_builder.build() {
                 Ok(exporter) => exporter,
                 Err(e) => {
                     error!(
@@ -356,27 +333,17 @@ fn init_metrics(config: Config) -> (Option<PrometheusRegistry>, SdkMeterProvider
                 }
             };
 
-            let reader = PeriodicReader::builder(exporter, runtime::Tokio)
+            let reader = PeriodicReader::builder(exporter)
                 .with_interval(Duration::from_secs(export_target.interval_secs))
-                .with_timeout(Duration::from_secs(export_target.timeout))
                 .build();
             meter_provider_builder = meter_provider_builder.with_reader(reader);
         }
     }
 
     if config.emit_metrics_to_stdout {
-        let exporter = MetricsExporterBuilder::default()
-            .with_encoder(|writer, data| {
-                if let Err(e) = serde_json::to_writer_pretty(writer, &data) {
-                    error!("writing metrics to log failed due to: {e:?}");
-                }
-                Ok(())
-            })
-            .build();
+        let exporter = json_metric_exporter::JsonMetricExporter::stdout();
 
-        let reader = PeriodicReader::builder(exporter, runtime::Tokio)
-            .with_timeout(Duration::from_secs(30))
-            .build();
+        let reader = PeriodicReader::builder(exporter).build();
         meter_provider_builder = meter_provider_builder.with_reader(reader);
     }
 
@@ -427,12 +394,11 @@ async fn metrics_handler(
     }
 }
 
-fn handle_tls(
-    exporter_builder: TonicExporterBuilder,
+fn build_channel(
     url: &str,
     ca_cert_path: Option<String>,
     timeout: Duration,
-) -> Result<TonicExporterBuilder, OtelError> {
+) -> Result<Option<Channel>, OtelError> {
     let (server_name, server_port, scheme) = {
         let url = Url::parse(url).map_err(OtelError::InvalidEndpointUrl)?;
         let server_name = url
@@ -501,9 +467,9 @@ fn handle_tls(
             .connect_timeout(timeout)
             .timeout(timeout)
             .connect_with_connector_lazy(custom_connector);
-        Ok(exporter_builder.with_channel(channel))
+        Ok(Some(channel))
     } else {
-        Ok(exporter_builder)
+        Ok(None)
     }
 }
 

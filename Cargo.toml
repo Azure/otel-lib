@@ -12,6 +12,7 @@ publish = true
 
 [dependencies]
 axum = "0.8"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
 env_filter = "2"
 futures = "0.3"
 futures-channel = "0.3"
@@ -39,14 +40,13 @@ opentelemetry_sdk = { version = "0.33", features = [
 	"rt-tokio",
 	"testing",
 ] }
-opentelemetry-stdout = "0.33"
 prometheus = "0.14"
 serde = { version = "1", features = ["derive", "rc"] }
 serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
-thiserror = "1.0"
+thiserror = "2"
 tokio = "1.53"
 tokio-openssl = "0.6"
-tonic = { version = "0.12" }
+tonic = "0.14"
 tower = { version = "0.5", features = ["util"] }
 url = "2"
 
@@ -54,15 +54,15 @@ url = "2"
 async-stream = "0.3"
 async-trait = "0.1"
 filetime = "0.2"
-opentelemetry-proto = { version = "0.7", features = [
+opentelemetry-proto = { version = "0.33", features = [
 	"gen-tonic",
 	"metrics",
 	"logs",
 ] }
-port_check = "0.2"
-prost = "0.13"
-reqwest = { version = "0.12", default-features = false }
-tonic = { version = "0.12", features = ["codegen", "prost"] }
+port_check = "0.3"
+prost = "0.14"
+reqwest = { version = "0.13", default-features = false }
+tonic = { version = "0.14", features = ["codegen"] }
 tokio = { version = "1.3", features = ["parking_lot"] }
 tokio-stream = "0.1"
 uuid = { version = "1", features = ["v4"] }
