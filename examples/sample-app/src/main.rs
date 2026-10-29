@@ -1,21 +1,20 @@
 // Copyright (c) Microsoft Corporation.
 // Licensed under the MIT License.
 
-use clap::{arg, command, Parser};
+use clap::Parser;
 use log::{error, info};
 use opentelemetry::logs::Severity;
-use opentelemetry_sdk::metrics::data::Temporality;
+use opentelemetry_sdk::metrics::Temporality;
 use otel_lib::{
     config::{Attribute, Config, LogsExportTarget, MetricsExportTarget, Prometheus},
     Otel,
 };
 
-use rand::Rng;
-use std::time::Duration;
+use std::{sync::atomic::Ordering, time::Duration};
 use tokio::join;
 use tokio::time::sleep;
 
-use crate::metrics::STATIC_METRICS;
+use crate::metrics::{OBSERVABLE_GAUGE_SET, OBSERVABLE_GAUGE_VALUE, STATIC_METRICS};
 
 mod metrics;
 
@@ -54,7 +53,7 @@ async fn main() {
         emit_metrics_to_stdout: false,
         metrics_export_targets: metrics_targets,
         log_export_targets: logs_targets,
-        level: "info,hyper=off".to_owned(),
+        level: "info".to_owned(),
         service_name: "sample-app".to_owned(),
         enterprise_number: Some("123".to_owned()),
         resource_attributes: Some(vec![Attribute {
@@ -79,7 +78,7 @@ async fn main() {
         for iteration in 0..args.num_iterations {
             STATIC_METRICS.requests.add(1, &[]);
             STATIC_METRICS.request_sizes.record(25, &[]);
-            let mut val: f64 = rand::thread_rng().gen();
+            let mut val: f64 = rand::random();
             val *= 1_000_000.0;
             STATIC_METRICS.request_sizes_f64.record(val, &[]);
             STATIC_METRICS.connection_errors.add(1, &[]);
@@ -87,10 +86,11 @@ async fn main() {
             if rand::random() {
                 STATIC_METRICS.updown_counter.add(val, &[]);
             } else {
-                STATIC_METRICS.updown_counter.add(val * -1.0, &[]);
+                STATIC_METRICS.updown_counter.add(-val, &[]);
             }
-            STATIC_METRICS.observable_gauge.observe(iteration, &[]);
-            info!("iteration: {}", iteration);
+            OBSERVABLE_GAUGE_VALUE.store(iteration, Ordering::Relaxed);
+            OBSERVABLE_GAUGE_SET.store(true, Ordering::Release);
+            info!("iteration: {iteration}");
             sleep(Duration::from_micros(100)).await;
         }
         info!("Done. Please hit [Ctrl+C] to exit");
@@ -119,5 +119,5 @@ struct Args {
 // Dummy method that just passes in a static string as a token that
 // serves as an example.
 fn get_dummy_bearer_token() -> String {
-    format!("{}", "dummy token")
+    "dummy token".to_string()
 }

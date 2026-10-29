@@ -11,63 +11,71 @@ publish = true
 
 
 [dependencies]
-axum = "0.6"
-env_filter = "0.1"
+axum = "0.8"
+chrono = { version = "0.4", default-features = false, features = ["std"] }
+env_filter = "2"
 futures = "0.3"
 futures-channel = "0.3"
 futures-executor = "0.3"
 futures-util = "0.3"
-humantime = "2.1"
-hyper = { version = "0.14", features = ["http1", "server"] }
+humantime = "2.4"
 hyper-util = "0.1"
 log = { version = "0.4", default-features = false }
-notify = "6"
-notify-debouncer-mini = "0.4"
-nix = { version = "0.27", default-features = false, features = [
-	"process", "hostname",
+notify-debouncer-mini = "0.7"
+nix = { version = "0.31", default-features = false, features = [
+	"process",
+	"hostname",
 ] }
 openssl = "0.10"
-opentelemetry = { version = "0.24", features = ["metrics", "logs"]}
-opentelemetry-otlp = { version ="0.17", features = ["grpc-tonic","metrics", "logs"]}
-opentelemetry-prometheus = {version = "0.17" }
-opentelemetry_sdk =  {version = "0.24", features = ["metrics", "logs", "rt-tokio", "testing", "logs_level_enabled"]}
-opentelemetry-stdout =  {version = "0.5", features = ["metrics"]}
-prometheus = "0.13"
-serde = { version = "1", features = [
-	"derive",
-	"rc",
+opentelemetry = { version = "0.33", features = ["metrics", "logs"] }
+opentelemetry-otlp = { version = "0.33", features = [
+	"grpc-tonic",
+	"metrics",
+	"logs",
 ] }
-serde_json = { version = "1.0", default-features = false, features = [
-	"alloc",
+opentelemetry-prometheus = "0.33"
+opentelemetry_sdk = { version = "0.33", features = [
+	"metrics",
+	"logs",
+	"rt-tokio",
+	"testing",
 ] }
-thiserror = "1.0"
-tokio = "1.40"
+prometheus = "0.14"
+serde = { version = "1", features = ["derive", "rc"] }
+serde_json = { version = "1.0", default-features = false, features = ["alloc"] }
+thiserror = "2"
+tokio = "1.53"
 tokio-openssl = "0.6"
-tonic = { version = "0.12" }
-tower = {version = "0.5", features = ["util"]}
+tonic = "0.14"
+tower = { version = "0.5", features = ["util"] }
 url = "2"
 
 [dev-dependencies]
 async-stream = "0.3"
 async-trait = "0.1"
 filetime = "0.2"
-opentelemetry-proto = { version = "0.7", features = ["gen-tonic", "metrics", "logs"] }
-port_check="0.2"
-prost = "0.13"
-reqwest = { version = "0.12", default-features = false }
-tonic = { version = "0.12", features = ["codegen", "prost"] }
-tokio = { version= "1.3", features = ["parking_lot"] }
+opentelemetry-proto = { version = "0.33", features = [
+	"gen-tonic",
+	"metrics",
+	"logs",
+] }
+port_check = "0.3"
+prost = "0.14"
+reqwest = { version = "0.13", default-features = false }
+tonic = { version = "0.14", features = ["codegen"] }
+tokio = { version = "1.3", features = ["parking_lot"] }
 tokio-stream = "0.1"
 uuid = { version = "1", features = ["v4"] }
 
 [lints.rust]
-rust_2018_idioms = "warn"
+rust_2018_idioms = { level = "deny", priority = -1 }
 
 
 [lints.clippy]
 all = { level = "warn", priority = -1 }
 pedantic = { level = "warn", priority = -1 }
 default_trait_access = "allow"
+doc_overindented_list_items = "allow"
 enum_variant_names = "allow"
 let_and_return = "allow"
 let_unit_value = "allow"
@@ -76,8 +84,8 @@ missing_panics_doc = "allow"
 module_inception = "allow"
 module_name_repetitions = "allow"
 must_use_candidate = "allow"
-# TODO(rustup): Buggy lint: https://github.com/rust-lang/rust-clippy/issues/12279
-no_effect_underscore_binding = "allow"
+needless_continue = "allow"
+result_large_err = "allow"
 return_self_not_must_use = "allow"
 similar_names = "allow"
 struct_field_names = "allow"

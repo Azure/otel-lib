@@ -8,26 +8,24 @@
 // If that issue is accepted and addressed, this implementation will no longer be required.
 
 use crate::runtime::{RuntimeChannel, TrySend};
-use futures_channel::oneshot;
 use futures_util::{
     future::{self, Either},
     {pin_mut, stream, StreamExt as _},
 };
 
 use opentelemetry::{
-    global,
-    logs::{AnyValue, LogError, LogResult, Severity},
+    logs::{AnyValue, Severity},
+    InstrumentationScope,
 };
 use opentelemetry_sdk::{
-    export::logs::{ExportResult, LogData, LogExporter},
-    logs::LogProcessor,
+    error::{OTelSdkError, OTelSdkResult},
+    logs::{LogBatch, LogExporter, LogProcessor, SdkLogRecord},
     Resource,
 };
 
 use std::{
-    borrow::Cow,
     fmt::{self, Debug, Formatter},
-    sync::Arc,
+    sync::{mpsc, Arc},
     time::Duration,
 };
 
@@ -55,66 +53,77 @@ impl<R: RuntimeChannel> Debug for FilteredBatchLogProcessor<R> {
 }
 
 impl<R: RuntimeChannel> LogProcessor for FilteredBatchLogProcessor<R> {
-    fn emit(&self, data: &mut LogData) {
-        let result = self
+    fn emit(&self, data: &mut SdkLogRecord, instrumentation: &InstrumentationScope) {
+        if let Err(err) = self
             .message_sender
-            .try_send(BatchMessage::ExportLog(data.clone()));
-
-        if let Err(err) = result {
-            global::handle_error(LogError::Other(err.into()));
+            .try_send(BatchMessage::ExportLog(Box::new((
+                data.clone(),
+                instrumentation.clone(),
+            ))))
+        {
+            eprintln!("log record couldn't be emitted: {err:?}");
         }
     }
 
-    fn force_flush(&self) -> LogResult<()> {
-        let (res_sender, res_receiver) = oneshot::channel();
+    fn force_flush(&self) -> Result<(), OTelSdkError> {
+        let (res_sender, res_receiver) = mpsc::sync_channel(1);
         self.message_sender
             .try_send(BatchMessage::Flush(Some(res_sender)))
-            .map_err(|err| LogError::Other(err.into()))?;
+            .map_err(|err| OTelSdkError::InternalFailure(err.to_string()))?;
 
-        futures_executor::block_on(res_receiver)
-            .map_err(|err| LogError::Other(err.into()))
-            .and_then(std::convert::identity)
+        res_receiver
+            .recv()
+            .map_err(|err| OTelSdkError::InternalFailure(err.to_string()))?
     }
 
-    fn shutdown(&self) -> LogResult<()> {
-        let (res_sender, res_receiver) = oneshot::channel();
+    fn shutdown_with_timeout(&self, timeout: Duration) -> Result<(), OTelSdkError> {
+        let (res_sender, res_receiver) = mpsc::sync_channel(1);
         self.message_sender
             .try_send(BatchMessage::Shutdown(res_sender))
-            .map_err(|err| LogError::Other(err.into()))?;
+            .map_err(|err| OTelSdkError::InternalFailure(err.to_string()))?;
 
-        futures_executor::block_on(res_receiver)
-            .map_err(|err| LogError::Other(err.into()))
-            .and_then(std::convert::identity)
+        res_receiver
+            .recv_timeout(timeout)
+            .map_err(|err| match err {
+                mpsc::RecvTimeoutError::Timeout => OTelSdkError::Timeout(timeout),
+                mpsc::RecvTimeoutError::Disconnected => {
+                    OTelSdkError::InternalFailure(err.to_string())
+                }
+            })?
     }
 
-    fn set_resource(&self, resource: &Resource) {
+    fn set_resource(&mut self, resource: &Resource) {
         let resource = Arc::new(resource.clone());
-        let _ = self
+        if let Err(err) = self
             .message_sender
-            .try_send(BatchMessage::SetResource(resource));
+            .try_send(BatchMessage::SetResource(resource))
+        {
+            eprintln!("failed to set log exporter resource: {err}");
+        }
     }
 
     fn event_enabled(
         &self,
         _level: opentelemetry::logs::Severity,
         _target: &str,
-        _name: &str,
+        _name: Option<&str>,
     ) -> bool {
         true
     }
 }
 
 impl<R: RuntimeChannel> FilteredBatchLogProcessor<R> {
-    pub(crate) fn new(
-        mut exporter: Box<dyn LogExporter>,
-        config: FilteredBatchConfig,
-        runtime: &R,
-    ) -> Self {
+    pub(crate) fn new<E>(mut exporter: Box<E>, config: FilteredBatchConfig, runtime: &R) -> Self
+    where
+        E: LogExporter + 'static,
+    {
         let (message_sender, message_receiver) =
             runtime.batch_message_channel(config.max_queue_size);
-        let ticker = runtime
-            .interval(config.scheduled_delay)
-            .map(|_| BatchMessage::Flush(None));
+        let ticker_runtime = runtime.clone();
+        let ticker = stream::unfold(ticker_runtime, move |runtime| async move {
+            runtime.delay(config.scheduled_delay).await;
+            Some((BatchMessage::Flush(None), runtime))
+        });
         let timeout_runtime = runtime.clone();
 
         // Spawn worker process via user-defined spawn function.
@@ -126,11 +135,11 @@ impl<R: RuntimeChannel> FilteredBatchLogProcessor<R> {
                 match message {
                     BatchMessage::ExportLog(log) => {
                         // Apply filtering using the dedicated function
-                        if !should_export_log(&log, &config) {
+                        if !should_export_log(&log.0, &config) {
                             continue; // skip logs that do not match the filters
                         }
 
-                        logs.push(Cow::Owned(log));
+                        logs.push(*log);
 
                         if logs.len() == config.max_export_batch_size {
                             let result = export_with_timeout(
@@ -142,7 +151,7 @@ impl<R: RuntimeChannel> FilteredBatchLogProcessor<R> {
                             .await;
 
                             if let Err(err) = result {
-                                global::handle_error(err);
+                                eprintln!("failed to export log batch: {err}");
                             }
                         }
                     }
@@ -158,12 +167,10 @@ impl<R: RuntimeChannel> FilteredBatchLogProcessor<R> {
 
                         if let Some(channel) = res_channel {
                             if let Err(result) = channel.send(result) {
-                                global::handle_error(LogError::from(format!(
-                                    "failed to send flush result: {result:?}"
-                                )));
+                                eprintln!("failed to send flush result: {result:?}");
                             }
                         } else if let Err(err) = result {
-                            global::handle_error(err);
+                            eprintln!("failed to export log batch: {err}");
                         }
                     }
                     // Stream has terminated or processor is shutdown, return to finish execution.
@@ -176,12 +183,11 @@ impl<R: RuntimeChannel> FilteredBatchLogProcessor<R> {
                         )
                         .await;
 
-                        exporter.shutdown();
+                        let shutdown_result = exporter.shutdown();
+                        let result = result.and(shutdown_result);
 
                         if let Err(result) = ch.send(result) {
-                            global::handle_error(LogError::from(format!(
-                                "failed to send batch processor shutdown result: {result:?}"
-                            )));
+                            eprintln!("failed to send batch processor shutdown result: {result:?}");
                         }
 
                         break;
@@ -213,11 +219,10 @@ impl<R: RuntimeChannel> FilteredBatchLogProcessor<R> {
 }
 
 /// Check if a log should be exported based on severity and target filtering rules
-fn should_export_log(log: &LogData, config: &FilteredBatchConfig) -> bool {
+fn should_export_log(log: &SdkLogRecord, config: &FilteredBatchConfig) -> bool {
     // Apply severity filtering
     let severity_matches = log
-        .record
-        .severity_number
+        .severity_number()
         .is_some_and(|sev| sev >= config.export_severity);
 
     if !severity_matches {
@@ -227,21 +232,19 @@ fn should_export_log(log: &LogData, config: &FilteredBatchConfig) -> bool {
     // Apply target filtering
     let target_matches = if let Some(ref target_filters) = config.target_filters {
         // Check if the log has a "target" attribute that matches any of our filters
-        log.record.attributes.as_ref().is_some_and(|attrs| {
-            attrs.iter().any(|(key, value)| {
-                if key.as_str() == "target" {
-                    // Extract string value from AnyValue by matching on the enum
-                    if let AnyValue::String(target_value) = value {
-                        let target_str = target_value.as_str();
-                        // Check if target matches any of the configured filters (exact match only)
-                        target_filters.iter().any(|filter| target_str == filter)
-                    } else {
-                        false
-                    }
+        log.attributes_iter().any(|(key, value)| {
+            if key.as_str() == "target" {
+                // Extract string value from AnyValue by matching on the enum
+                if let AnyValue::String(target_value) = value {
+                    let target_str = target_value.as_str();
+                    // Check if target matches any of the configured filters (exact match only)
+                    target_filters.iter().any(|filter| target_str == filter)
                 } else {
                     false
                 }
-            })
+            } else {
+                false
+            }
         })
     } else {
         true // if no target filters specified, accept all logs
@@ -254,8 +257,8 @@ async fn export_with_timeout<R, E>(
     time_out: Duration,
     exporter: &mut E,
     runtime: &R,
-    batch: Vec<Cow<'_, LogData>>,
-) -> ExportResult
+    batch: Vec<(SdkLogRecord, InstrumentationScope)>,
+) -> OTelSdkResult
 where
     R: RuntimeChannel,
     E: LogExporter + ?Sized,
@@ -264,13 +267,14 @@ where
         return Ok(());
     }
 
-    let export = exporter.export(batch);
+    let records: Vec<_> = batch.iter().map(|item| (&item.0, &item.1)).collect();
+    let export = exporter.export(LogBatch::new(&records));
     let delay = runtime.delay(time_out);
     pin_mut!(export);
     pin_mut!(delay);
     match future::select(export, delay).await {
         Either::Left((export_res, _)) => export_res,
-        Either::Right((_, _)) => ExportResult::Err(LogError::ExportTimedOut(time_out)),
+        Either::Right(((), _)) => Err(OTelSdkError::Timeout(time_out)),
     }
 }
 
@@ -346,12 +350,12 @@ where
 #[derive(Debug)]
 enum BatchMessage {
     /// Export logs, usually called when the log is emitted.
-    ExportLog(LogData),
+    ExportLog(Box<(SdkLogRecord, InstrumentationScope)>),
     /// Flush the current buffer to the backend, it can be triggered by
     /// pre configured interval or a call to `force_push` function.
-    Flush(Option<oneshot::Sender<ExportResult>>),
+    Flush(Option<mpsc::SyncSender<OTelSdkResult>>),
     /// Shut down the worker thread, push all logs in buffer to the backend.
-    Shutdown(oneshot::Sender<ExportResult>),
+    Shutdown(mpsc::SyncSender<OTelSdkResult>),
     /// Set the resource for the exporter.
     SetResource(Arc<Resource>),
 }
@@ -360,12 +364,125 @@ enum BatchMessage {
 #[allow(clippy::default_trait_access)]
 mod tests {
     use super::*;
+    use opentelemetry::logs::{Logger, LoggerProvider};
     use opentelemetry::{logs::AnyValue, logs::LogRecord};
-    use opentelemetry_sdk::logs::LogRecord as SdkLogRecord;
+    use opentelemetry_sdk::logs::SdkLoggerProvider;
+    use std::sync::Mutex;
+
+    #[derive(Debug, Clone)]
+    struct TestExporter(Arc<Mutex<Vec<(SdkLogRecord, InstrumentationScope)>>>);
+
+    impl LogExporter for TestExporter {
+        async fn export(&self, batch: LogBatch<'_>) -> OTelSdkResult {
+            self.0.lock().unwrap().extend(
+                batch
+                    .iter()
+                    .map(|(record, scope)| (record.clone(), scope.clone())),
+            );
+            Ok(())
+        }
+    }
+
+    #[derive(Debug)]
+    struct PendingExporter;
+
+    impl LogExporter for PendingExporter {
+        async fn export(&self, _batch: LogBatch<'_>) -> OTelSdkResult {
+            std::future::pending().await
+        }
+    }
+
+    #[tokio::test]
+    async fn processor_reports_export_timeout_on_flush() {
+        let mut config = create_test_config(Severity::Warn, None);
+        config.scheduled_delay = Duration::from_secs(10);
+        config.max_export_timeout = Duration::from_millis(30);
+        let processor = FilteredBatchLogProcessor::builder(PendingExporter, crate::runtime::Tokio)
+            .with_batch_config(config)
+            .build();
+        processor.emit(
+            &mut create_log_data(Some(Severity::Warn), None),
+            &InstrumentationScope::builder("test").build(),
+        );
+        tokio::task::spawn_blocking(move || {
+                assert!(matches!(processor.force_flush(), Err(OTelSdkError::Timeout(timeout)) if timeout == Duration::from_millis(30)));
+                processor.shutdown().unwrap();
+            })
+            .await
+            .unwrap();
+    }
+
+    #[tokio::test]
+    async fn processor_respects_shutdown_timeout() {
+        let mut config = create_test_config(Severity::Warn, None);
+        config.scheduled_delay = Duration::from_secs(10);
+        config.max_export_timeout = Duration::from_millis(150);
+        let processor = FilteredBatchLogProcessor::builder(PendingExporter, crate::runtime::Tokio)
+            .with_batch_config(config)
+            .build();
+        processor.emit(
+            &mut create_log_data(Some(Severity::Warn), None),
+            &InstrumentationScope::builder("test").build(),
+        );
+        tokio::task::spawn_blocking(move || {
+                assert!(matches!(processor.shutdown_with_timeout(Duration::from_millis(30)), Err(OTelSdkError::Timeout(timeout)) if timeout == Duration::from_millis(30)));
+            })
+            .await
+            .unwrap();
+        tokio::time::sleep(Duration::from_millis(180)).await;
+    }
+
+    #[tokio::test]
+    async fn processor_flushes_filtered_records_with_their_instrumentation_scope() {
+        let exported = Arc::new(Mutex::new(Vec::new()));
+        let processor = FilteredBatchLogProcessor::builder(
+            TestExporter(exported.clone()),
+            crate::runtime::Tokio,
+        )
+        .with_batch_config(create_test_config(
+            Severity::Warn,
+            Some(vec!["wanted".to_string()]),
+        ))
+        .build();
+        let scope = InstrumentationScope::builder("test-scope")
+            .with_version("1.2")
+            .build();
+        processor.emit(
+            &mut create_log_data(Some(Severity::Warn), Some("wanted")),
+            &scope,
+        );
+        processor.emit(
+            &mut create_log_data(Some(Severity::Info), Some("wanted")),
+            &scope,
+        );
+        processor.emit(
+            &mut create_log_data(Some(Severity::Error), Some("other")),
+            &scope,
+        );
+        tokio::task::spawn_blocking(move || {
+            processor.force_flush().unwrap();
+            processor.shutdown().unwrap();
+        })
+        .await
+        .unwrap();
+
+        let exported = exported.lock().unwrap();
+        assert_eq!(exported.len(), 1);
+        assert_eq!(exported[0].0.severity_number(), Some(Severity::Warn));
+        assert_eq!(exported[0].1.name(), "test-scope");
+        assert_eq!(exported[0].1.version(), Some("1.2"));
+    }
+
+    fn new_log_record() -> SdkLogRecord {
+        SdkLoggerProvider::builder()
+            .build()
+            .logger("test")
+            .create_log_record()
+    }
 
     /// Helper function to create a `LogData` with specified severity and target
-    fn create_log_data(severity: Option<Severity>, target: Option<&str>) -> LogData {
-        let mut log_record = SdkLogRecord::default();
+    fn create_log_data(severity: Option<Severity>, target: Option<&str>) -> SdkLogRecord {
+        let mut log_record = new_log_record();
 
         if let Some(sev) = severity {
             log_record.set_severity_number(sev);
@@ -375,10 +492,7 @@ mod tests {
             log_record.add_attribute("target", AnyValue::from(target_str.to_string()));
         }
 
-        LogData {
-            record: log_record,
-            instrumentation: Default::default(),
-        }
+        log_record
     }
 
     /// Helper function to create `FilteredBatchConfig` for testing
@@ -390,7 +504,7 @@ mod tests {
             max_queue_size: 100,
             scheduled_delay: Duration::from_millis(100),
             max_export_batch_size: 10,
-            max_export_timeout: Duration::from_millis(1000),
+            max_export_timeout: Duration::from_secs(1),
             export_severity,
             target_filters,
         }
@@ -548,14 +662,11 @@ mod tests {
         let config = create_test_config(Severity::Info, Some(vec!["critical_service".to_string()]));
 
         // Create a log with target attribute that's not a string
-        let mut log_record = SdkLogRecord::default();
+        let mut log_record = new_log_record();
         log_record.set_severity_number(Severity::Info);
         log_record.add_attribute("target", AnyValue::Int(123)); // Non-string value
 
-        let log_data = LogData {
-            record: log_record,
-            instrumentation: Default::default(),
-        };
+        let log_data = log_record;
 
         // Non-string target attributes should not match
         assert!(!should_export_log(&log_data, &config));
@@ -565,16 +676,13 @@ mod tests {
     fn test_should_export_log_multiple_attributes_with_target() {
         let config = create_test_config(Severity::Info, Some(vec!["critical_service".to_string()]));
 
-        let mut log_record = SdkLogRecord::default();
+        let mut log_record = new_log_record();
         log_record.set_severity_number(Severity::Info);
         log_record.add_attribute("service", AnyValue::from("some_service".to_string()));
         log_record.add_attribute("target", AnyValue::from("critical_service".to_string()));
         log_record.add_attribute("component", AnyValue::from("auth".to_string()));
 
-        let log_data = LogData {
-            record: log_record,
-            instrumentation: Default::default(),
-        };
+        let log_data = log_record;
 
         // Should find the target attribute among multiple attributes
         assert!(should_export_log(&log_data, &config));
@@ -662,16 +770,13 @@ mod tests {
         // Test log with multiple target-related attributes (only "target" should match)
         let config = create_test_config(Severity::Info, Some(vec!["service1".to_string()]));
 
-        let mut log_record = SdkLogRecord::default();
+        let mut log_record = new_log_record();
         log_record.set_severity_number(Severity::Info);
         log_record.add_attribute("target", AnyValue::from("service1".to_string()));
         log_record.add_attribute("target_service", AnyValue::from("service2".to_string()));
         log_record.add_attribute("service_target", AnyValue::from("service3".to_string()));
 
-        let log_data = LogData {
-            record: log_record,
-            instrumentation: Default::default(),
-        };
+        let log_data = log_record;
 
         // Should match because "target" attribute has "service1"
         assert!(should_export_log(&log_data, &config));

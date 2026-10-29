@@ -2,7 +2,7 @@
 // Licensed under the MIT License.
 
 use opentelemetry::logs::Severity;
-use opentelemetry_sdk::metrics::data::Temporality;
+use opentelemetry_sdk::metrics::Temporality;
 use serde::Deserialize;
 
 /// Observability configuration
@@ -119,7 +119,7 @@ pub struct Attribute {
 #[cfg(test)]
 mod tests {
     use opentelemetry::logs::Severity;
-    use opentelemetry_sdk::metrics::data::Temporality;
+    use opentelemetry_sdk::metrics::Temporality;
 
     use super::{Attribute, Config, LogsExportTarget, MetricsExportTarget, Prometheus};
 
@@ -171,7 +171,7 @@ mod tests {
             emit_metrics_to_stdout: false,
             metrics_export_targets: Some(metric_targets),
             log_export_targets: Some(logs_targets),
-            level: "info,hyper=off".to_owned(),
+            level: "info".to_owned(),
             service_name: "test-app".to_owned(),
             enterprise_number: Some("123".to_owned()),
             resource_attributes: Some(vec![Attribute {
@@ -186,7 +186,7 @@ mod tests {
         assert_eq!(config.enterprise_number, Some("123".to_owned()));
         assert!(!config.emit_metrics_to_stdout);
         assert!(!config.emit_logs_to_stderr);
-        assert_eq!(config.level, "info,hyper=off".to_owned());
+        assert_eq!(config.level, "info".to_owned());
     }
 
     fn get_dummy_auth_token() -> String {
