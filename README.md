@@ -19,6 +19,7 @@ The framework is configurable using the `Config` struct to setup
 
 Add the following to your cargo.toml
 ~~~
+otel-lib = { version = "0.2.0", registry = "aio-sdks" }
 opentelemetry = { version = "0.33", features = ["metrics", "logs"]}
 opentelemetry_sdk =  {version = "0.33", features = ["metrics", "logs", "rt-tokio"]}
 ~~~
@@ -119,6 +120,47 @@ For log instrumentation, use the standard log::crate macros.
 
 #### Instrument Traces
 Traces: TBD
+
+## Publishing
+
+Version 0.2.0 releases the OpenTelemetry 0.33 implementation, log-target filtering,
+shutdown handles, and shutdown timeout/race fixes. It is not API-compatible with
+the published 0.1.1 package, which uses OpenTelemetry 0.24. Consumers must update
+their OpenTelemetry dependencies together with `otel-lib`.
+
+The `aio-sdks` registry is configured in [.cargo/config.toml](.cargo/config.toml).
+Publishing requires Feed Publisher (Contributor) access to the Azure Artifacts
+`preview` feed and a PAT with Packaging Read & write scope.
+
+Check in the version bump and update the sample application's lockfile before
+publishing. From the repository root, validate the release:
+
+```sh
+make check
+make test
+```
+
+In Bash, authenticate without placing the PAT in command history:
+
+```bash
+read -rsp 'Azure Artifacts PAT: ' PAT; printf '\n'
+export CARGO_REGISTRIES_AIO_SDKS_TOKEN="Basic $(printf 'PAT:%s' "$PAT" | base64 | tr -d '\n')"
+unset PAT
+```
+
+From a clean checkout of the merged release commit, verify the package before
+uploading it. Do not skip verification or enable shell tracing with credentials
+set.
+
+```sh
+cargo publish --registry aio-sdks --dry-run
+# Run only after the dry run succeeds:
+cargo publish --registry aio-sdks
+unset CARGO_REGISTRIES_AIO_SDKS_TOKEN
+```
+
+Published versions are immutable. Use a new version for every release; do not
+attempt to replace 0.1.1 with the newer implementation.
 
 ## Contributing
 
