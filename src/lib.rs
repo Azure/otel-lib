@@ -4,7 +4,7 @@
 #![deny(rust_2018_idioms)]
 #![warn(clippy::all, clippy::pedantic)]
 
-use std::{collections::HashSet, path::PathBuf, str::FromStr, sync::Arc, time::Duration};
+use std::{collections::HashSet, str::FromStr, sync::Arc, time::Duration};
 
 use axum::{
     http::{self, StatusCode},
@@ -12,11 +12,7 @@ use axum::{
 };
 use hyper_util::rt::TokioIo;
 use log::{debug, error, info, warn};
-use notify_debouncer_mini::{
-    new_debouncer,
-    notify::{self, RecommendedWatcher, RecursiveMode},
-    DebouncedEvent, Debouncer,
-};
+use notify_debouncer_mini::notify;
 use openssl::ssl::{SslConnector, SslConnectorBuilder, SslMethod};
 use opentelemetry::{global, KeyValue};
 use opentelemetry_otlp::{MetricExporterBuilder, Protocol, WithExportConfig, WithTonicConfig};
@@ -31,8 +27,9 @@ use tokio_openssl::SslStream;
 use tonic::{metadata::AsciiMetadataValue, service::Interceptor, transport::Channel, Status};
 use url::Url;
 
-use self::config::Config;
+use self::{ca_watcher::CaWatcher, config::Config};
 
+mod ca_watcher;
 pub mod config;
 mod filtered_log_processor;
 mod json_metric_exporter;
@@ -112,20 +109,21 @@ impl Otel {
 
     /// Long running tasks for otel propagation.
     ///
+    /// Returns `OtelError::CaWatcherEvent` once any configured CA file changes, so the caller can
+    /// restart and load the new CA. Changes include writes, metadata updates, removal, renames
+    /// and symlink swaps. Opening a CA file read-only or reading it is not a change. Closing a CA
+    /// file that was opened for writing counts as a change, even if nothing was written.
+    ///
     /// # Errors
-    /// * `OtelError::WatcherError` - If there is an error with the CA file watcher
+    /// * `OtelError::WatcherError` - If the CA file watcher cannot start, or a configured CA path
+    ///   cannot be watched (for example, because it does not exist)
+    /// * `OtelError::CaWatcherEvent` - If a CA file changed or the watcher reported an error
+    /// * `OtelError::PrometheusServerStopped` - If the Prometheus endpoint stopped
     pub async fn run(&mut self) -> Result<(), OtelError> {
-        // Create watcher task to detect changes to the CA files
-        let (mut ca_watcher, mut ca_watcher_rx) = create_watcher()?;
-        self.ca_cert_paths.iter().for_each(|path| {
-            let _ = ca_watcher
-                .watcher()
-                .watch(&PathBuf::from(path), RecursiveMode::NonRecursive);
-            debug!("watching for changes to {path}");
-        });
+        let mut ca_watcher = CaWatcher::start(self.ca_cert_paths.iter().map(String::as_str))?;
 
         tokio::select! {
-            notification = ca_watcher_rx.recv(), if !self.ca_cert_paths.is_empty() => {
+            notification = ca_watcher.recv(), if !self.ca_cert_paths.is_empty() => {
                 match notification {
                     Some(Ok(event)) => {
                         info!("CA cert path changed: {event:?}");
@@ -213,32 +211,6 @@ impl Otel {
     pub async fn shutdown(&self) -> Result<(), mpsc::error::SendError<()>> {
         self.shutdown_tx.send(()).await // Just sends signal, run() handles the rest
     }
-}
-
-#[allow(clippy::type_complexity)]
-fn create_watcher() -> Result<
-    (
-        Debouncer<RecommendedWatcher>,
-        mpsc::Receiver<Result<Vec<DebouncedEvent>, notify::Error>>,
-    ),
-    OtelError,
-> {
-    // Create async channel for watcher notifications
-    let (async_tx, async_rx) = mpsc::channel(1);
-
-    // Create watcher with event handler that sends events to async channel
-    let watcher = new_debouncer(Duration::from_secs(1), move |res| {
-        let async_tx = async_tx.clone();
-        futures::executor::block_on(async {
-            if let Err(e) = async_tx.send(res).await {
-                error!("error sending watcher notification: {e}");
-            }
-        });
-    })
-    .map_err(OtelError::WatcherError)?;
-
-    // Return watch and receiver
-    Ok((watcher, async_rx))
 }
 
 /// Initialize metrics based on passed in config.

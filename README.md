@@ -107,6 +107,10 @@ Drive the task using something like
  _ = tokio::join!(otel_long_running_task);
 ~~~
 
+#### CA certificate changes
+When export targets set `ca_cert_path`, `run` watches those files and returns `OtelError::CaWatcherEvent` after one of them changes, so the component can restart and load the new CA. Writes, metadata updates (such as a new modification time), removal, renames, atomic replacement and Kubernetes ConfigMap or Secret volume updates all count as changes. Opening a CA file read-only or reading it does not. Closing a CA file that was opened for writing counts as a change, even if nothing was written, because some writes (such as through a memory map) send no other event.
+`run` returns `OtelError::WatcherError` if a configured CA path cannot be watched, for example because it does not exist.
+
 
 #### Instrument metrics
 ~~~

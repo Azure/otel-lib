@@ -24,7 +24,7 @@ use opentelemetry_proto::tonic::metrics::v1::AggregationTemporality;
 use opentelemetry_sdk::metrics::Temporality;
 use otel_lib::{
     config::{Attribute, Config, LogsExportTarget, MetricsExportTarget, Prometheus},
-    Otel,
+    Otel, OtelError,
 };
 use port_check::free_local_port_in_range;
 use tokio::sync::mpsc::Receiver;
@@ -46,6 +46,7 @@ mod mocks;
 // 3) add a metric, and create some logs
 // 4) validate that metrics are exported to both otlp servers and at avaialable at the prometheus endpoint
 // 5) validate that `warn` and `error` logs are exported to the unfiltered server and only `error` logs are exported to the filtered server.
+// 6) validate that reading the CA cert does not stop the otel component, and that changing it does.
 #[tokio::test]
 #[allow(clippy::too_many_lines)]
 async fn end_to_end_test() {
@@ -183,8 +184,9 @@ async fn end_to_end_test() {
         ..Config::default()
     };
 
+    let ca_cert_path = self_signed_cert.get_ca_cert_path();
     let mut otel_component = Otel::new(config);
-    let otel_long_running_task = tokio::spawn(async move { otel_component.run().await });
+    let mut otel_long_running_task = tokio::spawn(async move { otel_component.run().await });
     let run_tests_task = run_tests(
         filtered_target.metrics_rx,
         filtered_target_with_tls.metrics_rx,
@@ -200,12 +202,22 @@ async fn end_to_end_test() {
 
     run_tests_task.await;
 
+    // The Prometheus check in `run_tests` means `run` has already started watching the CA cert.
+    std::fs::read_to_string(&ca_cert_path).unwrap();
+
+    // Wait longer than the watcher debounce, which reports changes within 2 seconds.
+    if let Ok(result) = timeout(Duration::from_secs(3), &mut otel_long_running_task).await {
+        panic!("Otel component exited after a read-only open of the CA cert: {result:?}");
+    }
+    validate_test_counter_prometheus(prom_port).await;
+
     // Make a change to the CA cert file
-    touch_file(&PathBuf::from(self_signed_cert.get_ca_cert_path()));
+    touch_file(&PathBuf::from(&ca_cert_path));
 
     // Confirm otel task exits
     match timeout(Duration::from_secs(2), otel_long_running_task).await {
-        Ok(_) => {}
+        Ok(Ok(Err(OtelError::CaWatcherEvent))) => {}
+        Ok(result) => panic!("Otel component exited with {result:?} instead of a CA watcher event"),
         Err(e) => {
             panic!("Otel component did not exit on CA cert change: {e:?}");
         }
