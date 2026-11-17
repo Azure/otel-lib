@@ -110,13 +110,14 @@ impl Otel {
     /// Long running tasks for otel propagation.
     ///
     /// Returns `OtelError::CaWatcherEvent` once any configured CA file changes, so the caller can
-    /// restart and load the new CA. Changes include writes, metadata updates, removal, renames
-    /// and symlink swaps. Opening a CA file read-only or reading it is not a change. Closing a CA
-    /// file that was opened for writing counts as a change, even if nothing was written.
+    /// restart and load the new CA. Changes reported by the platform watcher include writes,
+    /// metadata updates, removal and renames. Opening a CA file read-only or reading it is not
+    /// a change. Closing a CA file that was opened for writing counts as a change, even if
+    /// nothing was written.
+    /// Individual watch-registration failures are logged without stopping the task.
     ///
     /// # Errors
-    /// * `OtelError::WatcherError` - If the CA file watcher cannot start, or a configured CA path
-    ///   cannot be watched (for example, because it does not exist)
+    /// * `OtelError::WatcherError` - If the CA file watcher cannot start
     /// * `OtelError::CaWatcherEvent` - If a CA file changed or the watcher reported an error
     /// * `OtelError::PrometheusServerStopped` - If the Prometheus endpoint stopped
     pub async fn run(&mut self) -> Result<(), OtelError> {

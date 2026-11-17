@@ -108,8 +108,9 @@ Drive the task using something like
 ~~~
 
 #### CA certificate changes
-When export targets set `ca_cert_path`, `run` watches those files and returns `OtelError::CaWatcherEvent` after one of them changes, so the component can restart and load the new CA. Writes, metadata updates (such as a new modification time), removal, renames, atomic replacement and Kubernetes ConfigMap or Secret volume updates all count as changes. Opening a CA file read-only or reading it does not. Closing a CA file that was opened for writing counts as a change, even if nothing was written, because some writes (such as through a memory map) send no other event.
-`run` returns `OtelError::WatcherError` if a configured CA path cannot be watched, for example because it does not exist.
+When export targets set `ca_cert_path`, `run` watches those files and returns `OtelError::CaWatcherEvent` on a reported change, so the component can restart and load the new CA. Opening a CA file read-only or reading it does not count as a change. Closing a CA file opened for writing remains a change signal, because memory-mapped writes may send no other event.
+On Linux, Kubernetes ConfigMap or Secret volume rotation is detected when the old target is removed. Retargeting only a symlink is not guaranteed to be detected; `subPath` mounts do not receive projected-volume updates.
+Individual watch-registration failures are logged without stopping the task or other exporters.
 
 
 #### Instrument metrics

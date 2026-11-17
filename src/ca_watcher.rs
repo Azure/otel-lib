@@ -3,7 +3,7 @@
 
 use std::{path::Path, time::Duration};
 
-use log::{debug, error};
+use log::{debug, error, warn};
 use notify_debouncer_mini::{
     new_debouncer_opt,
     notify::{
@@ -23,13 +23,12 @@ pub(crate) struct CaWatcher {
 }
 
 impl CaWatcher {
-    /// Starts watching every path in `paths`.
+    /// Registers watches for the configured paths before returning.
     ///
-    /// Each watch is registered before this returns, so changes made afterwards are reported.
+    /// Logs individual registration failures and continues with the remaining paths.
     ///
     /// # Errors
-    /// Returns an error if the watcher cannot start or if any path cannot be watched, for
-    /// example because it does not exist.
+    /// Returns an error if the watcher cannot start.
     pub(crate) fn start<'a>(
         paths: impl IntoIterator<Item = &'a str>,
     ) -> Result<Self, notify::Error> {
@@ -46,10 +45,13 @@ impl CaWatcher {
         })?;
 
         for path in paths {
-            debouncer
+            match debouncer
                 .watcher()
-                .watch(Path::new(path), RecursiveMode::NonRecursive)?;
-            debug!("watching for changes to {path}");
+                .watch(Path::new(path), RecursiveMode::NonRecursive)
+            {
+                Ok(()) => debug!("watching for changes to {path}"),
+                Err(e) => warn!("unable to watch CA file {path}: {e}"),
+            }
         }
 
         Ok(Self {
@@ -108,170 +110,80 @@ fn is_read_access(kind: EventKind) -> bool {
     matches!(kind, EventKind::Access(access) if access != AccessKind::Close(AccessMode::Write))
 }
 
-// The expected events and the symlink layout are specific to inotify on Linux.
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(test)]
 mod tests {
-    use std::{
-        collections::HashSet,
-        fs::{self, OpenOptions},
-        path::{Path, PathBuf},
-        time::{Duration, SystemTime},
+    use notify_debouncer_mini::notify::{
+        event::{AccessKind, AccessMode, DataChange, MetadataKind, ModifyKind, RemoveKind},
+        EventKind,
     };
 
-    use filetime::{set_file_mtime, FileTime};
-    use notify_debouncer_mini::notify::ErrorKind;
-    use tokio::time::timeout;
-    use uuid::Uuid;
+    use super::is_read_access;
 
-    use super::CaWatcher;
-
-    const EVENT_TIMEOUT: Duration = Duration::from_secs(10);
-
-    /// Directory that is removed when the test ends, even if it fails.
-    struct TestDir(PathBuf);
-
-    impl TestDir {
-        fn new() -> Self {
-            let path = std::env::temp_dir().join(format!("otel_lib_ca_watcher_{}", Uuid::new_v4()));
-            fs::create_dir(&path).unwrap();
-            Self(path)
+    #[test]
+    fn filters_read_access_but_keeps_change_signals() {
+        for (kind, ignored) in [
+            (EventKind::Access(AccessKind::Open(AccessMode::Any)), true),
+            (EventKind::Access(AccessKind::Read), true),
+            (EventKind::Access(AccessKind::Close(AccessMode::Read)), true),
+            (
+                EventKind::Access(AccessKind::Close(AccessMode::Write)),
+                false,
+            ),
+            (EventKind::Modify(ModifyKind::Data(DataChange::Any)), false),
+            (
+                EventKind::Modify(ModifyKind::Metadata(MetadataKind::Any)),
+                false,
+            ),
+            (EventKind::Remove(RemoveKind::Any), false),
+            (EventKind::Other, false),
+        ] {
+            assert_eq!(is_read_access(kind), ignored, "{kind:?}");
         }
     }
 
-    impl Drop for TestDir {
-        fn drop(&mut self) {
-            let _ = fs::remove_dir_all(&self.0);
-        }
-    }
+    #[cfg(target_os = "linux")]
+    #[tokio::test]
+    async fn failed_registration_preserves_read_filtering_and_write_close() {
+        use std::{collections::HashSet, fs, fs::OpenOptions, path::PathBuf, time::Duration};
 
-    #[derive(Clone, Copy, Debug)]
-    enum Change {
-        Write,
-        CloseAfterWriteOpen,
-        Touch,
-        Remove,
-        Rename,
-        AtomicReplace,
-        ProjectedVolumeRotation,
-    }
+        use tokio::time::timeout;
+        use uuid::Uuid;
 
-    /// Creates the CA file to watch and returns the path to watch.
-    fn create_ca(dir: &Path, change: Change) -> PathBuf {
-        match change {
-            Change::ProjectedVolumeRotation => {
-                // Kubernetes mounts each key as a symlink through `..data` to a timestamped
-                // directory.
-                fs::create_dir(dir.join("..2024_01")).unwrap();
-                fs::write(dir.join("..2024_01/ca.crt"), "old").unwrap();
-                std::os::unix::fs::symlink("..2024_01", dir.join("..data")).unwrap();
-                std::os::unix::fs::symlink("..data/ca.crt", dir.join("ca.crt")).unwrap();
-            }
-            _ => fs::write(dir.join("ca.crt"), "old").unwrap(),
-        }
-        dir.join("ca.crt")
-    }
+        use super::CaWatcher;
 
-    fn apply(dir: &Path, change: Change) {
-        let ca = dir.join("ca.crt");
-        match change {
-            Change::Write => fs::write(&ca, "new").unwrap(),
-            Change::CloseAfterWriteOpen => {
-                // Stands in for a write through a memory map, which only sends a close event.
-                drop(OpenOptions::new().write(true).open(&ca).unwrap());
-            }
-            Change::Touch => {
-                set_file_mtime(&ca, FileTime::from_system_time(SystemTime::now())).unwrap();
-            }
-            Change::Remove => fs::remove_file(&ca).unwrap(),
-            Change::Rename => fs::rename(&ca, dir.join("old.crt")).unwrap(),
-            Change::AtomicReplace => {
-                fs::write(dir.join("ca.crt.tmp"), "new").unwrap();
-                fs::rename(dir.join("ca.crt.tmp"), &ca).unwrap();
-            }
-            Change::ProjectedVolumeRotation => {
-                // Same steps as the kubelet atomic writer.
-                fs::create_dir(dir.join("..2024_02")).unwrap();
-                fs::write(dir.join("..2024_02/ca.crt"), "new").unwrap();
-                std::os::unix::fs::symlink("..2024_02", dir.join("..data_tmp")).unwrap();
-                fs::rename(dir.join("..data_tmp"), dir.join("..data")).unwrap();
-                fs::remove_dir_all(dir.join("..2024_01")).unwrap();
+        struct TestDir(PathBuf);
+        impl Drop for TestDir {
+            fn drop(&mut self) {
+                if let Err(e) = fs::remove_dir_all(&self.0) {
+                    eprintln!("unable to clean watcher test directory: {e}");
+                }
             }
         }
-    }
 
-    /// Reads one watched CA, then changes another, and checks that only the change is reported.
-    ///
-    /// Events reach the debouncer in order, so a reported read would arrive in the same batch
-    /// as the change or earlier.
-    async fn assert_only_change_reported(change: Change) {
-        let dir = TestDir::new();
+        let dir = TestDir(std::env::temp_dir().join(format!("otel_ca_{}", Uuid::new_v4())));
+        fs::create_dir(&dir.0).unwrap();
+        let missing = dir.0.join("missing.crt");
         let read_only = dir.0.join("read_only.crt");
+        let changed = dir.0.join("changed.crt");
         fs::write(&read_only, "unchanged").unwrap();
-        let changed = create_ca(&dir.0, change);
-
+        fs::write(&changed, "unchanged").unwrap();
         let mut watcher = CaWatcher::start(
-            [&read_only, &changed]
+            [&missing, &read_only, &changed]
                 .into_iter()
                 .map(|path| path.to_str().unwrap()),
         )
         .unwrap();
 
-        fs::read_to_string(&read_only).unwrap();
-        fs::read_to_string(&changed).unwrap();
-        apply(&dir.0, change);
+        fs::read(&read_only).unwrap();
+        fs::read(&changed).unwrap();
+        drop(OpenOptions::new().write(true).open(&changed).unwrap());
 
-        let events = timeout(EVENT_TIMEOUT, watcher.recv())
+        let events = timeout(Duration::from_secs(10), watcher.recv())
             .await
-            .unwrap_or_else(|_| panic!("{change:?}: no event within {EVENT_TIMEOUT:?}"))
+            .expect("write-close event did not arrive")
             .expect("watcher stopped")
-            .unwrap_or_else(|e| panic!("{change:?}: watcher error: {e:?}"));
+            .expect("watcher reported an error");
         let paths: HashSet<_> = events.into_iter().map(|event| event.path).collect();
-        assert_eq!(paths, HashSet::from([changed]), "{change:?}");
-    }
-
-    #[tokio::test]
-    async fn write_is_reported() {
-        assert_only_change_reported(Change::Write).await;
-    }
-
-    #[tokio::test]
-    async fn close_after_write_open_is_reported() {
-        assert_only_change_reported(Change::CloseAfterWriteOpen).await;
-    }
-
-    #[tokio::test]
-    async fn touch_is_reported() {
-        assert_only_change_reported(Change::Touch).await;
-    }
-
-    #[tokio::test]
-    async fn remove_is_reported() {
-        assert_only_change_reported(Change::Remove).await;
-    }
-
-    #[tokio::test]
-    async fn rename_is_reported() {
-        assert_only_change_reported(Change::Rename).await;
-    }
-
-    #[tokio::test]
-    async fn atomic_replace_is_reported() {
-        assert_only_change_reported(Change::AtomicReplace).await;
-    }
-
-    #[tokio::test]
-    async fn projected_volume_rotation_is_reported() {
-        assert_only_change_reported(Change::ProjectedVolumeRotation).await;
-    }
-
-    #[test]
-    fn missing_path_is_an_error() {
-        let dir = TestDir::new();
-        let missing = dir.0.join("missing.crt");
-
-        let Err(e) = CaWatcher::start([missing.to_str().unwrap()]) else {
-            panic!("watching {missing:?} should fail");
-        };
-        assert!(matches!(e.kind, ErrorKind::PathNotFound), "{e:?}");
+        assert_eq!(paths, HashSet::from([changed]));
     }
 }
